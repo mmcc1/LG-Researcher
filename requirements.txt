@@ -1,0 +1,9 @@
+beautifulsoup4==4.15.0
+ddgs==9.16.1
+httpx==0.28.1
+langchain_core==1.7.6
+langchain_ollama==1.1.0
+langgraph==1.2.20
+pydantic==2.14.2
+python-dotenv==1.2.4
+SQLAlchemy==2.1.8
