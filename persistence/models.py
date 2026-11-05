@@ -8,6 +8,8 @@ from sqlalchemy import (
     String,
     Text,
     Boolean,
+    Index,
+    text,
 )
 
 from sqlalchemy.orm import (
@@ -739,4 +741,141 @@ class ReportLimitation(Base):
     description: Mapped[str] = mapped_column(
         Text,
         nullable=False,
+    )
+
+
+    
+class UserAccount(Base):
+
+    __tablename__ = "users"
+
+    id: Mapped[str] = mapped_column(
+        String(36),
+        primary_key=True,
+    )
+
+    username: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+        unique=True,
+    )
+
+    email: Mapped[str] = mapped_column(
+        String(320),
+        nullable=False,
+        unique=True,
+    )
+
+    password_hash: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+    )
+
+    is_active: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+    )
+
+    email_reports_enabled: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+    )
+
+    last_login_at: Mapped[datetime | None] = mapped_column(
+        DateTime,
+        nullable=True,
+    )
+
+
+class ResearchJob(Base):
+
+    __tablename__ = "research_jobs"
+
+    __table_args__ = (
+        Index(
+            "ux_research_jobs_session",
+            "research_session_id",
+            unique=True,
+            mssql_where=text(
+                "research_session_id IS NOT NULL"
+            ),
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(
+        String(36),
+        primary_key=True,
+    )
+
+    user_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("users.id"),
+        nullable=False,
+        index=True,
+    )
+
+    research_session_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("research_sessions.id"),
+        nullable=True,
+    )
+
+    topic: Mapped[str] = mapped_column(
+        String(1000),
+        nullable=False,
+    )
+
+    scope: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
+    status: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        index=True,
+    )
+
+    submitted_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        index=True,
+    )
+
+    started_at: Mapped[datetime | None] = mapped_column(
+        DateTime,
+        nullable=True,
+    )
+
+    completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime,
+        nullable=True,
+    )
+
+    last_error: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
+    execution_owner: Mapped[str | None] = mapped_column(
+        String(36),
+        nullable=True,
+    )
+
+    lease_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime,
+        nullable=True,
+    )
+
+    lease_version: Mapped[int] = mapped_column(
+        BigInteger,
+        nullable=False,
+        default=0,
     )

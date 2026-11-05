@@ -1617,12 +1617,24 @@ class ResearchSessionRepository:
             research_session = self.db.get(
                 ResearchSession,
                 session_id,
+                populate_existing=True,
             )
 
             if research_session is None:
 
                 raise ValueError(
                     "Research session not found."
+                )
+
+            if (
+                not resume
+                and research_session.pause_requested is True
+            ):
+
+                raise RecoveryNotEligible(
+                    "Initial execution rejected because "
+                    "a pause has been requested for session "
+                    f"{session_id}"
                 )
 
             if research_session.status == "completed":
@@ -1634,10 +1646,7 @@ class ResearchSessionRepository:
 
             if not resume:
 
-                if research_session.status not in (
-                    "created",
-                    "planning",
-                ):
+                if research_session.status != "created":
 
                     raise ValueError(
                         "Research session cannot enter "
@@ -1774,7 +1783,9 @@ class ResearchSessionRepository:
             "planning",
             "planned",
             "researching",
+            "researched",
             "reviewing",
+            "reviewed",
             "reporting",
         }
 

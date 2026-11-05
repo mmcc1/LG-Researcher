@@ -1,0 +1,423 @@
+
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from uuid import uuid4
+
+from sqlalchemy import text
+from sqlalchemy.orm import Session
+
+from persistence.models import (
+    ResearchJob,
+    ResearchSession,
+)
+
+
+class ResearchJobLeaseUnavailable(RuntimeError):
+    """The job is not owned by the requested execution."""
+
+
+@dataclass(frozen=True)
+class ResearchJobLease:
+
+    job_id: str
+    owner: str
+    version: int
+    expires_at: datetime
+
+
+@dataclass(frozen=True)
+class ClaimedResearchJob:
+
+    job_id: str
+    user_id: str
+    topic: str
+    scope: str | None
+    research_session_id: str | None
+    lease: ResearchJobLease
+
+
+class ResearchJobRepository:
+
+    def __init__(self, db: Session):
+
+        self.db = db
+
+    @staticmethod
+    def _validate_duration(duration_seconds: int) -> None:
+
+        if (
+            not isinstance(duration_seconds, int)
+            or isinstance(duration_seconds, bool)
+            or not 1 <= duration_seconds <= 86400
+        ):
+            raise ValueError(
+                "duration_seconds must be an integer "
+                "from 1 to 86400"
+            )
+
+    def submit(
+        self,
+        user_id: str,
+        topic: str,
+        scope: str | None = None,
+    ) -> str:
+
+        if not user_id or not user_id.strip():
+            raise ValueError("user_id is required")
+
+        if not topic or not topic.strip():
+            raise ValueError("topic is required")
+
+        user_id = user_id.strip()
+        topic = topic.strip()
+
+        if len(topic) > 1000:
+            raise ValueError(
+                "topic cannot exceed 1000 characters"
+            )
+
+        if scope is not None:
+            scope = scope.strip() or None
+
+        job_id = str(uuid4())
+
+        now = datetime.now(timezone.utc).replace(
+            tzinfo=None
+        )
+
+        job = ResearchJob(
+            id=job_id,
+            user_id=user_id,
+            research_session_id=None,
+            topic=topic,
+            scope=scope,
+            status="queued",
+            submitted_at=now,
+            started_at=None,
+            completed_at=None,
+            last_error=None,
+            execution_owner=None,
+            lease_expires_at=None,
+            lease_version=0,
+        )
+
+        try:
+
+            self.db.add(job)
+            self.db.commit()
+
+        except Exception:
+
+            self.db.rollback()
+            raise
+
+        return job_id
+
+    def claim_next(
+        self,
+        duration_seconds: int = 120,
+    ) -> ClaimedResearchJob | None:
+
+        self._validate_duration(duration_seconds)
+
+        owner = str(uuid4())
+
+        # UPDLOCK reserves the selected row for this transaction.
+        # READPAST lets another worker skip a locked row.
+        # The update and ownership assignment are one statement.
+        statement = text("""
+            ;WITH next_job AS (
+                SELECT TOP (1)
+                    id,
+                    user_id,
+                    topic,
+                    scope,
+                    research_session_id,
+                    status,
+                    execution_owner,
+                    lease_expires_at,
+                    lease_version,
+                    started_at
+                FROM dbo.research_jobs WITH (
+                    UPDLOCK,
+                    READPAST,
+                    ROWLOCK
+                )
+                WHERE (
+                    status = 'queued'
+                    OR (
+                        status = 'claimed'
+                        AND lease_expires_at <= SYSUTCDATETIME()
+                    )
+                )
+                ORDER BY submitted_at, id
+            )
+            UPDATE next_job
+            SET status = 'claimed',
+                execution_owner = :owner,
+                lease_expires_at = DATEADD(
+                    second,
+                    :duration_seconds,
+                    SYSUTCDATETIME()
+                ),
+                lease_version = lease_version + 1
+            OUTPUT
+                INSERTED.id,
+                INSERTED.user_id,
+                INSERTED.topic,
+                INSERTED.scope,
+                INSERTED.research_session_id,
+                INSERTED.lease_version,
+                INSERTED.lease_expires_at
+        """)
+
+        try:
+
+            row = self.db.execute(
+                statement,
+                {
+                    "owner": owner,
+                    "duration_seconds": duration_seconds,
+                },
+            ).first()
+
+            self.db.commit()
+
+        except Exception:
+
+            self.db.rollback()
+            raise
+
+        if row is None:
+            return None
+
+        lease = ResearchJobLease(
+            job_id=row[0],
+            owner=owner,
+            version=int(row[5]),
+            expires_at=row[6],
+        )
+
+        return ClaimedResearchJob(
+            job_id=row[0],
+            user_id=row[1],
+            topic=row[2],
+            scope=row[3],
+            research_session_id=row[4],
+            lease=lease,
+        )
+
+    def renew(
+        self,
+        lease: ResearchJobLease,
+        duration_seconds: int = 120,
+    ) -> ResearchJobLease | None:
+
+        self._validate_duration(duration_seconds)
+
+        statement = text("""
+            UPDATE dbo.research_jobs
+            SET lease_expires_at = DATEADD(
+                second,
+                :duration_seconds,
+                SYSUTCDATETIME()
+            )
+            OUTPUT INSERTED.lease_expires_at
+            WHERE id = :job_id
+              AND execution_owner = :owner
+              AND lease_version = :version
+              AND status = 'claimed'
+              AND lease_expires_at > SYSUTCDATETIME()
+        """)
+
+        try:
+
+            row = self.db.execute(
+                statement,
+                {
+                    "job_id": lease.job_id,
+                    "owner": lease.owner,
+                    "version": lease.version,
+                    "duration_seconds": duration_seconds,
+                },
+            ).first()
+
+            self.db.commit()
+
+        except Exception:
+
+            self.db.rollback()
+            raise
+
+        if row is None:
+            return None
+
+        return ResearchJobLease(
+            job_id=lease.job_id,
+            owner=lease.owner,
+            version=lease.version,
+            expires_at=row[0],
+        )
+
+    def release(
+        self,
+        lease: ResearchJobLease,
+    ) -> bool:
+
+        # Only unstarted jobs can return to the queue.
+        # Increment the version to invalidate the old lease.
+        statement = text("""
+            UPDATE dbo.research_jobs
+            SET status = 'queued',
+                execution_owner = NULL,
+                lease_expires_at = NULL,
+                lease_version = lease_version + 1
+            OUTPUT INSERTED.id
+            WHERE id = :job_id
+              AND execution_owner = :owner
+              AND lease_version = :version
+              AND status = 'claimed'
+              AND research_session_id IS NULL
+              AND lease_expires_at > SYSUTCDATETIME()
+        """)
+
+        try:
+
+            row = self.db.execute(
+                statement,
+                {
+                    "job_id": lease.job_id,
+                    "owner": lease.owner,
+                    "version": lease.version,
+                },
+            ).first()
+
+            self.db.commit()
+
+        except Exception:
+
+            self.db.rollback()
+            raise
+
+        return row is not None
+
+    
+    def associate_session(
+        self,
+        lease: ResearchJobLease,
+    ) -> str:
+
+        try:
+
+            # Lock the job row until the transaction commits.
+            # This serializes competing association attempts.
+            statement = text("""
+                SELECT
+                    research_session_id,
+                    topic,
+                    scope
+                FROM dbo.research_jobs WITH (
+                    UPDLOCK,
+                    HOLDLOCK
+                )
+                WHERE id = :job_id
+                  AND execution_owner = :owner
+                  AND lease_version = :version
+                  AND status = 'claimed'
+                  AND lease_expires_at > SYSUTCDATETIME()
+            """)
+
+            row = self.db.execute(
+                statement,
+                {
+                    "job_id": lease.job_id,
+                    "owner": lease.owner,
+                    "version": lease.version,
+                },
+            ).first()
+
+            if row is None:
+
+                raise ResearchJobLeaseUnavailable(
+                    "Cannot associate a research session "
+                    "because the job lease is no longer valid."
+                )
+
+            existing_session_id = row[0]
+
+            if existing_session_id is not None:
+
+                self.db.commit()
+
+                return str(existing_session_id)
+
+            topic = row[1]
+            scope = row[2]
+
+            now = datetime.now(
+                timezone.utc
+            ).replace(
+                tzinfo=None
+            )
+
+            session_id = str(uuid4())
+
+            research_session = ResearchSession(
+                id=session_id,
+                topic=topic,
+                scope=scope,
+                status="created",
+                pause_requested=False,
+                created_at=now,
+                updated_at=now,
+            )
+
+            self.db.add(
+                research_session
+            )
+
+            # Insert the session within the current transaction.
+            # Do not call ResearchSessionRepository.create(),
+            # because that method commits independently.
+            self.db.flush()
+
+            update_statement = text("""
+                UPDATE dbo.research_jobs
+                SET research_session_id = :session_id
+                WHERE id = :job_id
+                  AND execution_owner = :owner
+                  AND lease_version = :version
+                  AND status = 'claimed'
+                  AND research_session_id IS NULL
+                  AND lease_expires_at > SYSUTCDATETIME()
+            """)
+
+            result = self.db.execute(
+                update_statement,
+                {
+                    "session_id": session_id,
+                    "job_id": lease.job_id,
+                    "owner": lease.owner,
+                    "version": lease.version,
+                },
+            )
+
+            if result.rowcount != 1:
+
+                raise ResearchJobLeaseUnavailable(
+                    "Job ownership changed before "
+                    "the research session was associated."
+                )
+
+            # The session insert and job association
+            # become durable together.
+            self.db.commit()
+
+            return session_id
+
+        except Exception:
+
+            self.db.rollback()
+
+            raise
+
