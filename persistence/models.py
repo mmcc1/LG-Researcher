@@ -843,9 +843,14 @@ class ResearchJob(Base):
         index=True,
     )
 
-    submitted_at: Mapped[datetime] = mapped_column(
+    created_at: Mapped[datetime] = mapped_column(
         DateTime,
         nullable=False,
+    )
+
+    submitted_at: Mapped[datetime | None] = mapped_column(
+        DateTime,
+        nullable=True,
         index=True,
     )
 
@@ -878,4 +883,32 @@ class ResearchJob(Base):
         BigInteger,
         nullable=False,
         default=0,
+    )
+
+
+class ResearchJobQuestion(Base):
+
+    __tablename__ = "research_job_questions"
+
+    id: Mapped[int] = mapped_column(
+        Integer,
+        primary_key=True,
+        autoincrement=True,
+    )
+
+    research_job_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("research_jobs.id"),
+        nullable=False,
+        index=True,
+    )
+
+    question: Mapped[str] = mapped_column(
+        String(2000),
+        nullable=False,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
     )

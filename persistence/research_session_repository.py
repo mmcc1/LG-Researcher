@@ -1677,60 +1677,6 @@ class ResearchSessionRepository:
             raise
 
 
-    def find_recovery_candidates(
-        self,
-        limit: int = 100,
-    ) -> list[str]:
-
-        if (
-            not isinstance(limit, int)
-            or isinstance(limit, bool)
-            or not 1 <= limit <= 1000
-        ):
-            raise ValueError(
-                "limit must be an integer from 1 to 1000"
-            )
-
-        statement = text(
-            """
-            SELECT TOP (:limit)
-                id
-            FROM dbo.research_sessions
-            WHERE status IN (
-                'planning',
-                'planned',
-                'researching',
-                'reviewing',
-                'reporting'
-            )
-            AND (
-                pause_requested = 0
-                OR pause_requested IS NULL
-            )
-            AND (
-                execution_owner IS NULL
-                OR execution_lease_expires_at IS NULL
-                OR execution_lease_expires_at <= SYSUTCDATETIME()
-            )
-            ORDER BY
-                updated_at ASC,
-                id ASC
-            """
-        )
-
-        rows = self.db.execute(
-            statement,
-            {
-                "limit": limit,
-            },
-        ).all()
-
-        return [
-            str(row[0])
-            for row in rows
-        ]
-
-
     def find_recovery_candidates(self, limit: int = 100) -> list[str]:
         """Discover unpaused, unowned or expired in-flight sessions.
 

@@ -1,3 +1,4 @@
+
 from time import perf_counter
 
 from sqlalchemy.orm import sessionmaker
@@ -48,6 +49,7 @@ class GenerateReportNode:
         context_builder: ReportContextBuilder,
         validator: ReportValidator,
     ):
+
         self.session_factory = (
             session_factory
         )
@@ -70,12 +72,16 @@ class GenerateReportNode:
         config: RunnableConfig,
     ) -> dict:
 
-        session_id = state["session_id"]
+        session_id = state[
+            "session_id"
+        ]
 
-        lease = config.get(
+        configurable = config.get(
             "configurable",
             {},
-        ).get(
+        )
+
+        lease = configurable.get(
             "execution_lease"
         )
 
@@ -96,7 +102,26 @@ class GenerateReportNode:
                 "the research session."
             )
 
-        topic = state["topic"]
+        execution_guard = configurable.get(
+            "execution_guard"
+        )
+
+        if (
+            execution_guard is not None
+            and not callable(execution_guard)
+        ):
+
+            raise TypeError(
+                "Execution guard must be callable."
+            )
+
+        if execution_guard is not None:
+
+            execution_guard()
+
+        topic = state[
+            "topic"
+        ]
 
         #
         # -------------------------------------------------
@@ -127,6 +152,10 @@ class GenerateReportNode:
                         lease=lease,
                     )
                 )
+
+                if execution_guard is not None:
+
+                    execution_guard()
 
                 print()
                 print(
@@ -199,6 +228,10 @@ class GenerateReportNode:
         # with no persisted report and will safely
         # regenerate it.
         #
+
+        if execution_guard is not None:
+
+            execution_guard()
 
         with self.session_factory() as db:
 
@@ -286,6 +319,10 @@ class GenerateReportNode:
         # -------------------------------------------------
         #
 
+        if execution_guard is not None:
+
+            execution_guard()
+
         report_start = (
             perf_counter()
         )
@@ -298,6 +335,10 @@ class GenerateReportNode:
                 ),
             )
         )
+
+        if execution_guard is not None:
+
+            execution_guard()
 
         report_elapsed = (
             perf_counter()
@@ -330,6 +371,10 @@ class GenerateReportNode:
             "Report provenance validation passed."
         )
 
+        if execution_guard is not None:
+
+            execution_guard()
+
         #
         # -------------------------------------------------
         # Persistence
@@ -346,7 +391,6 @@ class GenerateReportNode:
             perf_counter()
         )
 
-        
         with self.session_factory() as db:
 
             report_repository = (

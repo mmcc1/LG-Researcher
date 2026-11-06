@@ -10,6 +10,10 @@ from application.execution_lease_heartbeat import (
     ExecutionLeaseHeartbeat,
 )
 
+from application.workflow_execution_guard import (
+    WorkflowExecutionGuard,
+)
+
 from persistence.execution_lease_repository import (
     ExecutionLease,
     ExecutionLeaseRepository,
@@ -421,6 +425,11 @@ class ResearchWorkflowService:
 
             try:
 
+                combined_guard = WorkflowExecutionGuard(
+                    execution_lease_check=heartbeat.check,
+                    job_lease_check=execution_guard,
+                )
+
                 return self._execute(
                     session_id=session_id,
                     topic=topic,
@@ -428,7 +437,7 @@ class ResearchWorkflowService:
                     resume=resume,
                     execution_target=execution_target,
                     lease=lease,
-                    execution_guard=execution_guard,
+                    execution_guard=combined_guard,
                 )
 
             finally:

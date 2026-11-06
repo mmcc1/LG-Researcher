@@ -11,6 +11,12 @@ from persistence.models import (
     ResearchSession,
 )
 
+from persistence.models import (
+    ResearchJob,
+    ResearchJobQuestion,
+    ResearchSession,
+)
+
 
 class ResearchJobLeaseUnavailable(RuntimeError):
     """The job is not owned by the requested execution."""
@@ -36,6 +42,15 @@ class ClaimedResearchJob:
     lease: ResearchJobLease
 
 
+@dataclass(frozen=True)
+class ResearchJobQuestionRecord:
+
+    id: int
+    research_job_id: str
+    question: str
+    created_at: datetime
+
+
 class ResearchJobRepository:
 
     def __init__(self, db: Session):
@@ -54,6 +69,348 @@ class ResearchJobRepository:
                 "duration_seconds must be an integer "
                 "from 1 to 86400"
             )
+
+
+
+    def create_draft(
+        self,
+        user_id: str,
+        topic: str,
+        scope: str | None = None,
+    ) -> str:
+
+        if not user_id or not user_id.strip():
+            raise ValueError("user_id is required")
+
+        if not topic or not topic.strip():
+            raise ValueError("topic is required")
+
+        user_id = user_id.strip()
+        topic = topic.strip()
+
+        if len(topic) > 1000:
+            raise ValueError(
+                "topic cannot exceed 1000 characters"
+            )
+
+        if scope is not None:
+            scope = scope.strip() or None
+
+        job_id = str(uuid4())
+
+        now = datetime.now(
+            timezone.utc
+        ).replace(
+            tzinfo=None
+        )
+
+        job = ResearchJob(
+            id=job_id,
+            user_id=user_id,
+            research_session_id=None,
+            topic=topic,
+            scope=scope,
+            status="draft",
+            created_at=now,
+            submitted_at=None,
+            started_at=None,
+            completed_at=None,
+            last_error=None,
+            execution_owner=None,
+            lease_expires_at=None,
+            lease_version=0,
+        )
+
+        try:
+
+            self.db.add(job)
+            self.db.commit()
+
+        except Exception:
+
+            self.db.rollback()
+            raise
+
+        return job_id
+
+
+    def update_draft(
+        self,
+        job_id: str,
+        user_id: str,
+        topic: str,
+        scope: str | None,
+    ) -> bool:
+
+        if not topic or not topic.strip():
+            raise ValueError("topic is required")
+
+        topic = topic.strip()
+
+        if len(topic) > 1000:
+            raise ValueError(
+                "topic cannot exceed 1000 characters"
+            )
+
+        if scope is not None:
+            scope = scope.strip() or None
+
+        statement = text("""
+            UPDATE dbo.research_jobs
+            SET topic = :topic,
+                scope = :scope
+            OUTPUT INSERTED.id
+            WHERE id = :job_id
+              AND user_id = :user_id
+              AND status = 'draft'
+              AND research_session_id IS NULL
+        """)
+
+        try:
+
+            row = self.db.execute(
+                statement,
+                {
+                    "job_id": job_id,
+                    "user_id": user_id,
+                    "topic": topic,
+                    "scope": scope,
+                },
+            ).first()
+
+            self.db.commit()
+
+        except Exception:
+
+            self.db.rollback()
+            raise
+
+        return row is not None
+
+
+    def submit_draft(
+        self,
+        job_id: str,
+        user_id: str,
+    ) -> bool:
+
+        statement = text("""
+            UPDATE dbo.research_jobs
+            SET status = 'queued',
+                submitted_at = SYSUTCDATETIME()
+            OUTPUT INSERTED.id
+            WHERE id = :job_id
+              AND user_id = :user_id
+              AND status = 'draft'
+              AND research_session_id IS NULL
+              AND submitted_at IS NULL
+        """)
+
+        try:
+
+            row = self.db.execute(
+                statement,
+                {
+                    "job_id": job_id,
+                    "user_id": user_id,
+                },
+            ).first()
+
+            self.db.commit()
+
+        except Exception:
+
+            self.db.rollback()
+            raise
+
+        return row is not None
+
+    
+    def add_draft_question(
+        self,
+        job_id: str,
+        user_id: str,
+        question: str,
+    ) -> int | None:
+
+        if not question or not question.strip():
+            raise ValueError("question is required")
+
+        question = question.strip()
+
+        if len(question) > 2000:
+            raise ValueError(
+                "question cannot exceed 2000 characters"
+            )
+
+        try:
+
+            # Hold the parent job lock until the question
+            # insertion commits. Submission must acquire
+            # the same row lock before changing status.
+            statement = text("""
+                SELECT id
+                FROM dbo.research_jobs WITH (
+                    UPDLOCK,
+                    HOLDLOCK
+                )
+                WHERE id = :job_id
+                  AND user_id = :user_id
+                  AND status = 'draft'
+                  AND research_session_id IS NULL
+                  AND submitted_at IS NULL
+            """)
+
+            row = self.db.execute(
+                statement,
+                {
+                    "job_id": job_id,
+                    "user_id": user_id,
+                },
+            ).first()
+
+            if row is None:
+
+                self.db.rollback()
+                return None
+
+            now = datetime.now(
+                timezone.utc
+            ).replace(
+                tzinfo=None
+            )
+
+            draft_question = ResearchJobQuestion(
+                research_job_id=job_id,
+                question=question,
+                created_at=now,
+            )
+
+            self.db.add(draft_question)
+            self.db.flush()
+
+            question_id = draft_question.id
+
+            self.db.commit()
+
+            return question_id
+
+        except Exception:
+
+            self.db.rollback()
+            raise
+
+    def remove_draft_question(
+        self,
+        job_id: str,
+        user_id: str,
+        question_id: int,
+    ) -> bool:
+
+        try:
+
+            statement = text("""
+                SELECT id
+                FROM dbo.research_jobs WITH (
+                    UPDLOCK,
+                    HOLDLOCK
+                )
+                WHERE id = :job_id
+                  AND user_id = :user_id
+                  AND status = 'draft'
+                  AND research_session_id IS NULL
+                  AND submitted_at IS NULL
+            """)
+
+            row = self.db.execute(
+                statement,
+                {
+                    "job_id": job_id,
+                    "user_id": user_id,
+                },
+            ).first()
+
+            if row is None:
+
+                self.db.rollback()
+                return False
+
+            delete_statement = text("""
+                DELETE FROM dbo.research_job_questions
+                OUTPUT DELETED.id
+                WHERE id = :question_id
+                  AND research_job_id = :job_id
+            """)
+
+            deleted_row = self.db.execute(
+                delete_statement,
+                {
+                    "question_id": question_id,
+                    "job_id": job_id,
+                },
+            ).first()
+
+            self.db.commit()
+
+            return deleted_row is not None
+
+        except Exception:
+
+            self.db.rollback()
+            raise
+
+    def list_draft_questions(
+        self,
+        job_id: str,
+        user_id: str,
+    ) -> list[ResearchJobQuestionRecord]:
+
+        statement = text("""
+            SELECT
+                q.id,
+                q.research_job_id,
+                q.question,
+                q.created_at
+            FROM dbo.research_job_questions AS q
+            INNER JOIN dbo.research_jobs AS j
+                ON j.id = q.research_job_id
+            WHERE j.id = :job_id
+              AND j.user_id = :user_id
+            ORDER BY q.id
+        """)
+
+        try:
+
+            rows = self.db.execute(
+                statement,
+                {
+                    "job_id": job_id,
+                    "user_id": user_id,
+                },
+            ).all()
+
+            questions = []
+
+            for row in rows:
+
+                record = ResearchJobQuestionRecord(
+                    id=int(row[0]),
+                    research_job_id=row[1],
+                    question=row[2],
+                    created_at=row[3],
+                )
+
+                questions.append(record)
+
+            self.db.commit()
+
+            return questions
+
+        except Exception:
+
+            self.db.rollback()
+            raise
+
 
     def submit(
         self,
@@ -92,6 +449,7 @@ class ResearchJobRepository:
             topic=topic,
             scope=scope,
             status="queued",
+            created_at=now,
             submitted_at=now,
             started_at=None,
             completed_at=None,

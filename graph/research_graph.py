@@ -1,3 +1,4 @@
+
 from langgraph.graph import (
     END,
     START,
@@ -5,6 +6,10 @@ from langgraph.graph import (
 )
 
 from sqlalchemy.orm import sessionmaker
+
+from application.guarded_graph_node import (
+    GuardedGraphNode,
+)
 
 from agents.research_planner import (
     ResearchPlanner,
@@ -427,87 +432,121 @@ def create_research_graph(
 
     builder.add_node(
         "plan_research",
-        research_planner,
+        GuardedGraphNode(
+            node=research_planner,
+        ),
     )
 
     builder.add_node(
         "save_research_plan",
-        save_research_plan,
+        GuardedGraphNode(
+            node=save_research_plan,
+        ),
     )
 
     builder.add_node(
         "select_question",
-        select_question,
+        GuardedGraphNode(
+            node=select_question,
+        ),
     )
 
     builder.add_node(
         "check_existing_search",
-        check_existing_search,
+        GuardedGraphNode(
+            node=check_existing_search,
+        ),
     )
 
     builder.add_node(
         "create_search_plan",
-        create_search_plan,
+        GuardedGraphNode(
+            node=create_search_plan,
+        ),
     )
 
     builder.add_node(
         "search_web",
-        search_web,
+        GuardedGraphNode(
+            node=search_web,
+        ),
     )
 
     builder.add_node(
         "save_search_results",
-        save_search_results,
+        GuardedGraphNode(
+            node=save_search_results,
+        ),
     )
 
     builder.add_node(
         "retrieve_sources",
-        retrieve_sources,
+        GuardedGraphNode(
+            node=retrieve_sources,
+        ),
     )
 
     builder.add_node(
         "analyse_sources",
-        analyse_sources,
+        GuardedGraphNode(
+            node=analyse_sources,
+        ),
     )
 
     builder.add_node(
         "complete_question",
-        complete_question,
+        GuardedGraphNode(
+            node=complete_question,
+        ),
     )
 
     builder.add_node(
         "complete_research",
-        complete_research,
+        GuardedGraphNode(
+            node=complete_research,
+        ),
     )
 
     builder.add_node(
         "select_review_question",
-        select_review_question,
+        GuardedGraphNode(
+            node=select_review_question,
+        ),
     )
 
     builder.add_node(
         "review_question",
-        review_question,
+        GuardedGraphNode(
+            node=review_question,
+        ),
     )
 
     builder.add_node(
         "complete_review",
-        complete_review,
+        GuardedGraphNode(
+            node=complete_review,
+        ),
     )
 
     builder.add_node(
         "generate_report",
-        generate_report,
+        GuardedGraphNode(
+            node=generate_report,
+        ),
     )
 
     builder.add_node(
         "complete_report",
-        complete_report,
+        GuardedGraphNode(
+            node=complete_report,
+        ),
     )
 
     builder.add_node(
         "select_resume_phase",
-        select_resume_phase,
+        GuardedGraphNode(
+            node=select_resume_phase,
+        ),
     )
 
     #
@@ -521,37 +560,51 @@ def create_research_graph(
 
     builder.add_node(
         "check_pause_planning",
-        check_pause,
+        GuardedGraphNode(
+            node=check_pause,
+        ),
     )
 
     builder.add_node(
         "check_pause_research",
-        check_pause,
+        GuardedGraphNode(
+            node=check_pause,
+        ),
     )
 
     builder.add_node(
         "check_pause_after_research",
-        check_pause,
+        GuardedGraphNode(
+            node=check_pause,
+        ),
     )
 
     builder.add_node(
         "check_pause_review",
-        check_pause,
+        GuardedGraphNode(
+            node=check_pause,
+        ),
     )
 
     builder.add_node(
         "check_pause_after_review",
-        check_pause,
+        GuardedGraphNode(
+            node=check_pause,
+        ),
     )
 
     builder.add_node(
         "check_pause_report",
-        check_pause,
+        GuardedGraphNode(
+            node=check_pause,
+        ),
     )
 
     builder.add_node(
         "check_pause_before_report",
-        check_pause,
+        GuardedGraphNode(
+            node=check_pause,
+        ),
     )
 
     #
@@ -799,7 +852,7 @@ def create_research_graph(
             "stop": END,
             "report": "check_pause_after_review",
         },
-)
+    )
 
     builder.add_conditional_edges(
         "check_pause_after_review",
@@ -810,7 +863,6 @@ def create_research_graph(
         },
     )
 
-    
     #
     # -------------------------------------------------
     # Report phase
@@ -864,7 +916,6 @@ def create_research_graph(
         "complete_report",
         END,
     )
-
 
     return builder.compile()
 
@@ -927,7 +978,6 @@ def route_start(
         return "resume"
 
     return "new"
-
 
 
 def route_resume_phase(

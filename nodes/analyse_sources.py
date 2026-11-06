@@ -1,25 +1,40 @@
+
+from time import perf_counter
+
 from sqlalchemy.orm import sessionmaker
+from langchain_core.runnables import RunnableConfig
 
 from agents.source_summariser import (
     SourceSummariser,
 )
-from graph.state import ResearchState
-from persistence.finding_repository import (
-    FindingRepository,
-)
-from persistence.source_repository import (
-    SourceRepository,
-)
-from time import perf_counter
-from processing.source_context_builder import (
-    SourceContextBuilder,
+
+from application.execution_lease_heartbeat import (
+    ExecutionLeaseLost,
 )
 
-from langchain_core.runnables import RunnableConfig
+from application.research_job_heartbeat import (
+    ResearchJobLeaseLost,
+)
+
+from graph.state import ResearchState
+
 from persistence.execution_lease_repository import (
     ExecutionLease,
     ExecutionLeaseFenceRejected,
 )
+
+from persistence.finding_repository import (
+    FindingRepository,
+)
+
+from persistence.source_repository import (
+    SourceRepository,
+)
+
+from processing.source_context_builder import (
+    SourceContextBuilder,
+)
+
 
 class AnalyseSourcesNode:
 
@@ -29,20 +44,23 @@ class AnalyseSourcesNode:
         summariser: SourceSummariser,
         context_builder: SourceContextBuilder,
     ):
+
         self.session_factory = session_factory
         self.summariser = summariser
         self.context_builder = context_builder
 
     def __call__(
-            self,
-            state: ResearchState,
-            config: RunnableConfig,
-            ) -> dict:
+        self,
+        state: ResearchState,
+        config: RunnableConfig,
+    ) -> dict:
 
-        lease = config.get(
+        configurable = config.get(
             "configurable",
             {},
-        ).get(
+        )
+
+        lease = configurable.get(
             "execution_lease"
         )
 
@@ -50,27 +68,57 @@ class AnalyseSourcesNode:
             lease,
             ExecutionLease,
         ):
+
             raise RuntimeError(
-                "Execution lease is missing from graph configuration."
+                "Execution lease is missing "
+                "from graph configuration."
             )
-        
+
+        execution_guard = configurable.get(
+            "execution_guard"
+        )
+
+        if (
+            execution_guard is not None
+            and not callable(execution_guard)
+        ):
+
+            raise TypeError(
+                "Execution guard must be callable."
+            )
+
+        session_id = state["session_id"]
+
+        if lease.session_id != session_id:
+
+            raise ValueError(
+                "Execution lease does not match "
+                "the research session."
+            )
+
         question_id = state[
             "current_question_id"
-             ]
-        
+        ]
+
         question = state[
             "current_question"
-            ]
+        ]
 
         if question_id is None:
+
             raise ValueError(
                 "No research question selected."
             )
 
         if question is None:
+
             raise ValueError(
                 "Research question text is missing."
             )
+
+        if execution_guard is not None:
+
+            execution_guard()
 
         with self.session_factory() as db:
 
@@ -93,13 +141,17 @@ class AnalyseSourcesNode:
             start=1,
         ):
 
-            try:
+            if execution_guard is not None:
 
-                
+                execution_guard()
+
+            try:
 
                 with self.session_factory() as db:
 
-                    finding_repository = FindingRepository(db)
+                    finding_repository = FindingRepository(
+                        db
+                    )
 
                     if finding_repository.analysis_exists(
                         source_id=source.id,
@@ -118,17 +170,19 @@ class AnalyseSourcesNode:
                     f"Analysing source "
                     f"{index}/{len(sources)}"
                 )
+
                 print(
                     f"Source ID: {source.id}"
                 )
+
                 print(
                     f"Title: {source.title}"
                 )
+
                 print(
                     f"Text length: "
                     f"{len(source.extracted_text):,}"
                 )
-
 
                 context, chunk_count, selected_count = (
                     self.context_builder.build(
@@ -150,6 +204,10 @@ class AnalyseSourcesNode:
                     f"{len(context):,} chars"
                 )
 
+                if execution_guard is not None:
+
+                    execution_guard()
+
                 started = perf_counter()
 
                 analysis = self.summariser.analyse(
@@ -159,13 +217,17 @@ class AnalyseSourcesNode:
                     source_text=context,
                 )
 
+                if execution_guard is not None:
+
+                    execution_guard()
+
                 elapsed = perf_counter() - started
 
                 print(
                     f"Model completed in "
                     f"{elapsed:.1f} seconds."
                 )
-                
+
                 print(
                     f"Model returned "
                     f"{len(analysis.findings)} findings."
@@ -173,8 +235,8 @@ class AnalyseSourcesNode:
 
                 with self.session_factory() as db:
 
-                    finding_repository = (
-                        FindingRepository(db)
+                    finding_repository = FindingRepository(
+                        db
                     )
 
                     finding_repository.save_analysis(
@@ -188,7 +250,11 @@ class AnalyseSourcesNode:
                     f"Source {source.id} analysis saved."
                 )
 
-            except ExecutionLeaseFenceRejected:
+            except (
+                ExecutionLeaseFenceRejected,
+                ExecutionLeaseLost,
+                ResearchJobLeaseLost,
+            ):
 
                 raise
 
@@ -199,6 +265,10 @@ class AnalyseSourcesNode:
                     f"{source.id}: "
                     f"{type(ex).__name__}: {ex}"
                 )
+
+        if execution_guard is not None:
+
+            execution_guard()
 
         print()
         print("Source analysis complete.")

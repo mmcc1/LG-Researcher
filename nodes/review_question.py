@@ -1,17 +1,16 @@
+
 from time import perf_counter
 
 from sqlalchemy.orm import sessionmaker
 
-from agents.review_agent import ReviewAgent
+from agents.review_agent import (
+    ReviewAgent,
+)
 
 from graph.state import ResearchState
 
 from persistence.finding_repository import (
     FindingRepository,
-)
-
-from persistence.research_session_repository import (
-    ResearchSessionRepository,
 )
 
 from persistence.review_repository import (
@@ -43,6 +42,7 @@ class ReviewQuestionNode:
         review_agent: ReviewAgent,
         context_builder: ReviewContextBuilder,
     ):
+
         self.session_factory = (
             session_factory
         )
@@ -91,10 +91,12 @@ class ReviewQuestionNode:
             "session_id"
         ]
 
-        lease = config.get(
+        configurable = config.get(
             "configurable",
             {},
-        ).get(
+        )
+
+        lease = configurable.get(
             "execution_lease"
         )
 
@@ -115,6 +117,23 @@ class ReviewQuestionNode:
                 "the research session."
             )
 
+        execution_guard = configurable.get(
+            "execution_guard"
+        )
+
+        if (
+            execution_guard is not None
+            and not callable(execution_guard)
+        ):
+
+            raise TypeError(
+                "Execution guard must be callable."
+            )
+
+        if execution_guard is not None:
+
+            execution_guard()
+
         #
         # First load the evidence required by
         # the reviewer.
@@ -124,10 +143,6 @@ class ReviewQuestionNode:
 
             review_repository = (
                 ReviewRepository(db)
-            )
-
-            research_repository = (
-                ResearchSessionRepository(db)
             )
 
             #
@@ -153,6 +168,10 @@ class ReviewQuestionNode:
                         lease=lease,
                     )
                 )
+
+                if execution_guard is not None:
+
+                    execution_guard()
 
                 print(
                     "Review already exists for "
@@ -251,6 +270,10 @@ class ReviewQuestionNode:
         # Measure only the LLM invocation.
         #
 
+        if execution_guard is not None:
+
+            execution_guard()
+
         review_start = perf_counter()
 
         review = self.review_agent.review(
@@ -262,6 +285,10 @@ class ReviewQuestionNode:
                 valid_finding_ids
             ),
         )
+
+        if execution_guard is not None:
+
+            execution_guard()
 
         review_elapsed = (
             perf_counter()

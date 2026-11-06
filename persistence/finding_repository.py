@@ -64,6 +64,23 @@ class FindingRepository:
                     "belong to the execution session."
                 )
 
+            existing_analysis = (
+                self.db.query(SourceSummary)
+                .filter(
+                    SourceSummary.source_id
+                    == source_id,
+                    SourceSummary.research_question_id
+                    == question_id,
+                )
+                .first()
+            )
+
+            if existing_analysis is not None:
+
+                self.db.commit()
+
+                return
+
             now = datetime.now(timezone.utc)
 
             summary = SourceSummary(

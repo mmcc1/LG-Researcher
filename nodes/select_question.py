@@ -31,11 +31,17 @@ class SelectQuestionNode:
 
         session_id = state["session_id"]
 
-        lease = config.get(
+        configurable = config.get(
             "configurable",
             {},
-        ).get(
+        )
+
+        lease = configurable.get(
             "execution_lease"
+        )
+
+        execution_guard = configurable.get(
+            "execution_guard"
         )
 
         if not isinstance(
@@ -54,6 +60,18 @@ class SelectQuestionNode:
                 "Execution lease does not match "
                 "the research session."
             )
+
+        if (
+            execution_guard is not None
+            and not callable(execution_guard)
+        ):
+
+            raise TypeError(
+                "Execution guard must be callable."
+            )
+
+        if execution_guard is not None:
+            execution_guard()
 
         with self.session_factory() as db:
 
@@ -77,6 +95,9 @@ class SelectQuestionNode:
 
                 question_id = question.id
                 question_text = question.question
+
+        if execution_guard is not None:
+            execution_guard()
 
         if question_id is None:
 
