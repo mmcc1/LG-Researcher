@@ -7,6 +7,7 @@ from persistence.research_job_repository import (
     ResearchJobRepository,
 )
 
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -138,6 +139,23 @@ class ResearchJobHeartbeat:
                 or "Research job lease ownership lost."
             )
 
+        now = datetime.now(timezone.utc)
+
+        expires_at = self.lease.expires_at
+
+        if expires_at.tzinfo is None:
+
+            expires_at = expires_at.replace(
+                tzinfo=timezone.utc
+            )
+
+        if now >= expires_at:
+
+            raise ResearchJobLeaseLost(
+                "Research job lease has expired."
+            )
+
+    
     def stop(self) -> None:
 
         self._stop_event.set()
@@ -145,5 +163,3 @@ class ResearchJobHeartbeat:
         if self._thread is not None:
 
             self._thread.join()
-
-        self.check()

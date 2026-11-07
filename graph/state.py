@@ -11,6 +11,8 @@ class ResearchState(TypedDict):
     topic: str
 
     scope: NotRequired[str | None]
+    
+    user_questions: NotRequired[list[str]]
 
     resume: bool
 

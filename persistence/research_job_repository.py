@@ -8,11 +8,6 @@ from sqlalchemy.orm import Session
 
 from persistence.models import (
     ResearchJob,
-    ResearchSession,
-)
-
-from persistence.models import (
-    ResearchJob,
     ResearchJobQuestion,
     ResearchSession,
 )
@@ -226,6 +221,7 @@ class ResearchJobRepository:
         return row is not None
 
     
+    
     def add_draft_question(
         self,
         job_id: str,
@@ -245,31 +241,36 @@ class ResearchJobRepository:
 
         try:
 
-            # Hold the parent job lock until the question
-            # insertion commits. Submission must acquire
-            # the same row lock before changing status.
+            # Acquire the parent job lock using its primary key.
+            # Keep the lock until the insertion commits.
             statement = text("""
-                SELECT id
+                SELECT
+                    id,
+                    user_id,
+                    status,
+                    research_session_id,
+                    submitted_at
                 FROM dbo.research_jobs WITH (
                     UPDLOCK,
                     HOLDLOCK
                 )
                 WHERE id = :job_id
-                  AND user_id = :user_id
-                  AND status = 'draft'
-                  AND research_session_id IS NULL
-                  AND submitted_at IS NULL
             """)
 
             row = self.db.execute(
                 statement,
                 {
                     "job_id": job_id,
-                    "user_id": user_id,
                 },
             ).first()
 
-            if row is None:
+            if (
+                row is None
+                or row[1] != user_id
+                or row[2] != "draft"
+                or row[3] is not None
+                or row[4] is not None
+            ):
 
                 self.db.rollback()
                 return None
@@ -300,6 +301,8 @@ class ResearchJobRepository:
             self.db.rollback()
             raise
 
+
+        
     def remove_draft_question(
         self,
         job_id: str,
@@ -309,28 +312,35 @@ class ResearchJobRepository:
 
         try:
 
+            # Serialize question deletion against job submission.
             statement = text("""
-                SELECT id
+                SELECT
+                    id,
+                    user_id,
+                    status,
+                    research_session_id,
+                    submitted_at
                 FROM dbo.research_jobs WITH (
                     UPDLOCK,
                     HOLDLOCK
                 )
                 WHERE id = :job_id
-                  AND user_id = :user_id
-                  AND status = 'draft'
-                  AND research_session_id IS NULL
-                  AND submitted_at IS NULL
             """)
 
             row = self.db.execute(
                 statement,
                 {
                     "job_id": job_id,
-                    "user_id": user_id,
                 },
             ).first()
 
-            if row is None:
+            if (
+                row is None
+                or row[1] != user_id
+                or row[2] != "draft"
+                or row[3] is not None
+                or row[4] is not None
+            ):
 
                 self.db.rollback()
                 return False
@@ -358,6 +368,8 @@ class ResearchJobRepository:
 
             self.db.rollback()
             raise
+
+
 
     def list_draft_questions(
         self,
@@ -410,6 +422,46 @@ class ResearchJobRepository:
 
             self.db.rollback()
             raise
+
+    
+    def list_session_job_questions(
+        self,
+        session_id: str,
+    ) -> list[str]:
+
+        statement = text("""
+            SELECT
+                q.question
+            FROM dbo.research_job_questions AS q
+            INNER JOIN dbo.research_jobs AS j
+                ON j.id = q.research_job_id
+            WHERE j.research_session_id = :session_id
+            ORDER BY q.id
+        """)
+
+        try:
+
+            rows = self.db.execute(
+                statement,
+                {
+                    "session_id": session_id,
+                },
+            ).all()
+
+            questions = [
+                row[0]
+                for row in rows
+            ]
+
+            self.db.commit()
+
+            return questions
+
+        except Exception:
+
+            self.db.rollback()
+            raise
+
 
 
     def submit(
@@ -779,3 +831,103 @@ class ResearchJobRepository:
 
             raise
 
+    def complete(
+        self,
+        lease: ResearchJobLease,
+    ) -> bool:
+
+        statement = text("""
+            UPDATE j
+            SET status = 'completed',
+                completed_at = SYSUTCDATETIME(),
+                execution_owner = NULL,
+                lease_expires_at = NULL,
+                lease_version = lease_version + 1,
+                last_error = NULL
+            OUTPUT INSERTED.id
+            FROM dbo.research_jobs AS j
+            INNER JOIN dbo.research_sessions AS s
+                ON s.id = j.research_session_id
+            WHERE j.id = :job_id
+              AND j.execution_owner = :owner
+              AND j.lease_version = :version
+              AND j.status = 'claimed'
+              AND j.lease_expires_at > SYSUTCDATETIME()
+              AND s.status = 'completed'
+        """)
+
+        try:
+
+            row = self.db.execute(
+                statement,
+                {
+                    "job_id": lease.job_id,
+                    "owner": lease.owner,
+                    "version": lease.version,
+                },
+            ).first()
+
+            self.db.commit()
+
+        except Exception:
+
+            self.db.rollback()
+            raise
+
+        return row is not None
+
+    def fail(
+        self,
+        lease: ResearchJobLease,
+        error: str,
+    ) -> bool:
+
+        if not isinstance(error, str):
+
+            raise ValueError(
+                "error must be a string"
+            )
+
+        error = error.strip()
+
+        if not error:
+
+            raise ValueError(
+                "error must not be empty"
+            )
+
+        statement = text("""
+            UPDATE dbo.research_jobs
+            SET status = 'failed',
+                execution_owner = NULL,
+                lease_expires_at = NULL,
+                lease_version = lease_version + 1,
+                last_error = :error
+            OUTPUT INSERTED.id
+            WHERE id = :job_id
+            AND execution_owner = :owner
+            AND lease_version = :version
+            AND status = 'claimed'
+            AND lease_expires_at > SYSUTCDATETIME()
+        """)
+
+        try:
+
+            row = self.db.execute(
+                statement,
+                {
+                    "job_id": lease.job_id,
+                    "owner": lease.owner,
+                    "version": lease.version,
+                    "error": error,
+                },
+            ).first()
+
+            self.db.commit()
+
+        except Exception:
+
+            self.db.rollback()
+            raise
+
+        return row is not None

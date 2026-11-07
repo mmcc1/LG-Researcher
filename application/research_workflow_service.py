@@ -24,6 +24,10 @@ from persistence.research_session_repository import (
     RecoveryNotEligible,
 )
 
+from persistence.research_job_repository import (
+    ResearchJobRepository,
+)
+
 
 logger = logging.getLogger(__name__)
 
@@ -521,11 +525,24 @@ class ResearchWorkflowService:
                 "Unsupported research workflow execution target: "
                 f"{execution_target}"
             )
+        
+        with self.session_factory() as db:
+
+            job_repository = ResearchJobRepository(
+                db
+            )
+
+            user_questions = (
+                job_repository.list_session_job_questions(
+                    session_id=session_id,
+                )
+            )
 
         initial_state = {
             "session_id": session_id,
             "topic": topic,
             "scope": scope,
+            "user_questions": user_questions,
             "resume": resume,
             "resume_phase": None,
             "execution_target": execution_target,
@@ -548,6 +565,7 @@ class ResearchWorkflowService:
             initial_state,
             config={
                 "configurable": {
+                    "thread_id": session_id,
                     "execution_lease": lease,
                     "execution_guard": execution_guard,
                 },

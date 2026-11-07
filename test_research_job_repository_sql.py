@@ -72,16 +72,32 @@ def test_environment():
 
         yield Session, user_id
 
+    
     finally:
 
         with Session() as db:
 
             db.execute(
                 text("""
+                    DELETE q
+                    FROM dbo.research_job_questions AS q
+                    INNER JOIN dbo.research_jobs AS j
+                        ON j.id = q.research_job_id
+                    WHERE j.user_id = :user_id
+                """),
+                {
+                    "user_id": user_id,
+                },
+            )
+
+            db.execute(
+                text("""
                     DELETE FROM dbo.research_jobs
                     WHERE user_id = :user_id
                 """),
-                {"user_id": user_id},
+                {
+                    "user_id": user_id,
+                },
             )
 
             db.execute(
@@ -89,12 +105,15 @@ def test_environment():
                     DELETE FROM dbo.users
                     WHERE id = :user_id
                 """),
-                {"user_id": user_id},
+                {
+                    "user_id": user_id,
+                },
             )
 
             db.commit()
 
         test_engine.dispose()
+
 
 
 def test_sql_submit_and_claim(test_environment):
@@ -942,3 +961,413 @@ def test_sql_concurrent_associated_job_recovery(
 
                 db.commit()
 
+
+
+def test_sql_submitted_questions_available_to_session(
+    test_environment,
+):
+
+    Session, user_id = test_environment
+
+    session_id = None
+
+    original_questions = [
+        "How does Shor's algorithm threaten Bitcoin?",
+        "What post-quantum signatures could Bitcoin adopt?",
+    ]
+
+    try:
+
+        with Session() as db:
+
+            repository = ResearchJobRepository(db)
+
+            job_id = repository.create_draft(
+                user_id=user_id,
+                topic="Quantum computing and Bitcoin",
+                scope="Cryptographic threats and mitigations",
+            )
+
+            for question in original_questions:
+
+                question_id = repository.add_draft_question(
+                    job_id=job_id,
+                    user_id=user_id,
+                    question=question,
+                )
+
+                assert question_id is not None
+
+            submitted = repository.submit_draft(
+                job_id=job_id,
+                user_id=user_id,
+            )
+
+            assert submitted is True
+
+            claimed = repository.claim_next()
+
+            assert claimed is not None
+            assert claimed.job_id == job_id
+
+            session_id = repository.associate_session(
+                claimed.lease
+            )
+
+            retrieved_questions = (
+                repository.list_session_job_questions(
+                    session_id=session_id,
+                )
+            )
+
+            assert retrieved_questions == original_questions
+
+            repeated_questions = (
+                repository.list_session_job_questions(
+                    session_id=session_id,
+                )
+            )
+
+            assert repeated_questions == original_questions
+
+    finally:
+
+        if session_id is not None:
+
+            with Session() as db:
+
+                db.execute(
+                    text("""
+                        UPDATE dbo.research_jobs
+                        SET research_session_id = NULL
+                        WHERE research_session_id = :session_id
+                    """),
+                    {
+                        "session_id": session_id,
+                    },
+                )
+
+                db.execute(
+                    text("""
+                        DELETE FROM dbo.research_sessions
+                        WHERE id = :session_id
+                    """),
+                    {
+                        "session_id": session_id,
+                    },
+                )
+
+                db.commit()
+
+
+def cleanup_associated_session(
+    Session,
+    job_id,
+    session_id,
+):
+
+    with Session() as db:
+
+        db.execute(
+            text("""
+                UPDATE dbo.research_jobs
+                SET research_session_id = NULL
+                WHERE id = :job_id
+                  AND research_session_id = :session_id
+            """),
+            {
+                "job_id": job_id,
+                "session_id": session_id,
+            },
+        )
+
+        db.execute(
+            text("""
+                DELETE FROM dbo.research_sessions
+                WHERE id = :session_id
+            """),
+            {
+                "session_id": session_id,
+            },
+        )
+
+        db.commit()
+
+
+def test_sql_complete_requires_completed_session(
+    test_environment,
+):
+
+    Session, user_id = test_environment
+
+    session_id = None
+    job_id = None
+
+    try:
+
+        with Session() as db:
+
+            repository = ResearchJobRepository(db)
+
+            job_id = repository.submit(
+                user_id=user_id,
+                topic="Premature completion protection",
+            )
+
+            claimed = repository.claim_next()
+
+            assert claimed is not None
+            assert claimed.job_id == job_id
+
+            session_id = repository.associate_session(
+                claimed.lease
+            )
+
+            assert repository.complete(
+                claimed.lease
+            ) is False
+
+            row = db.execute(
+                text("""
+                    SELECT status, execution_owner, lease_version
+                    FROM dbo.research_jobs
+                    WHERE id = :job_id
+                """),
+                {
+                    "job_id": job_id,
+                },
+            ).one()
+
+            assert row[0] == "claimed"
+            assert row[1] == claimed.lease.owner
+            assert row[2] == claimed.lease.version
+
+    finally:
+
+        if session_id is not None:
+
+            cleanup_associated_session(
+                Session=Session,
+                job_id=job_id,
+                session_id=session_id,
+            )
+
+
+def test_sql_complete_finalizes_completed_session(
+    test_environment,
+):
+
+    Session, user_id = test_environment
+
+    session_id = None
+    job_id = None
+
+    try:
+
+        with Session() as db:
+
+            repository = ResearchJobRepository(db)
+
+            job_id = repository.submit(
+                user_id=user_id,
+                topic="Completed research job",
+            )
+
+            claimed = repository.claim_next()
+
+            assert claimed is not None
+            assert claimed.job_id == job_id
+
+            session_id = repository.associate_session(
+                claimed.lease
+            )
+
+            db.execute(
+                text("""
+                    UPDATE dbo.research_sessions
+                    SET status = 'completed',
+                        updated_at = SYSUTCDATETIME()
+                    WHERE id = :session_id
+                """),
+                {
+                    "session_id": session_id,
+                },
+            )
+
+            db.commit()
+
+            assert repository.complete(
+                claimed.lease
+            ) is True
+
+            row = db.execute(
+                text("""
+                    SELECT status, execution_owner,
+                           lease_expires_at, lease_version,
+                           completed_at, last_error
+                    FROM dbo.research_jobs
+                    WHERE id = :job_id
+                """),
+                {
+                    "job_id": job_id,
+                },
+            ).one()
+
+            assert row[0] == "completed"
+            assert row[1] is None
+            assert row[2] is None
+            assert row[3] > claimed.lease.version
+            assert row[4] is not None
+            assert row[5] is None
+
+            assert repository.complete(
+                claimed.lease
+            ) is False
+
+            assert repository.fail(
+                claimed.lease,
+                error="Stale completion attempt",
+            ) is False
+
+            assert repository.renew(
+                claimed.lease
+            ) is None
+
+            assert repository.claim_next() is None
+
+    finally:
+
+        if session_id is not None:
+
+            cleanup_associated_session(
+                Session=Session,
+                job_id=job_id,
+                session_id=session_id,
+            )
+
+
+def test_sql_fail_finalizes_claimed_job(
+    test_environment,
+):
+
+    Session, user_id = test_environment
+
+    with Session() as db:
+
+        repository = ResearchJobRepository(db)
+
+        job_id = repository.submit(
+            user_id=user_id,
+            topic="Failed research job",
+        )
+
+        claimed = repository.claim_next()
+
+        assert claimed is not None
+        assert claimed.job_id == job_id
+
+        assert repository.fail(
+            lease=claimed.lease,
+            error="  Simulated workflow failure.  ",
+        ) is True
+
+        row = db.execute(
+            text("""
+                SELECT status, execution_owner,
+                       lease_expires_at, lease_version,
+                       last_error
+                FROM dbo.research_jobs
+                WHERE id = :job_id
+            """),
+            {
+                "job_id": job_id,
+            },
+        ).one()
+
+        assert row[0] == "failed"
+        assert row[1] is None
+        assert row[2] is None
+        assert row[3] > claimed.lease.version
+        assert row[4] == "Simulated workflow failure."
+
+        assert repository.fail(
+            lease=claimed.lease,
+            error="Stale failure attempt",
+        ) is False
+
+        assert repository.renew(
+            claimed.lease
+        ) is None
+
+        assert repository.claim_next() is None
+
+
+def test_sql_reclaimed_job_rejects_stale_finalization(
+    test_environment,
+):
+
+    Session, user_id = test_environment
+
+    with Session() as db:
+
+        repository = ResearchJobRepository(db)
+
+        job_id = repository.submit(
+            user_id=user_id,
+            topic="Stale worker finalization",
+        )
+
+        original = repository.claim_next()
+
+        assert original is not None
+        assert original.job_id == job_id
+
+        db.execute(
+            text("""
+                UPDATE dbo.research_jobs
+                SET lease_expires_at = DATEADD(
+                    second,
+                    -10,
+                    SYSUTCDATETIME()
+                )
+                WHERE id = :job_id
+            """),
+            {
+                "job_id": job_id,
+            },
+        )
+
+        db.commit()
+
+        recovered = repository.claim_next()
+
+        assert recovered is not None
+        assert recovered.job_id == job_id
+        assert recovered.lease.version > original.lease.version
+        assert recovered.lease.owner != original.lease.owner
+
+        assert repository.complete(
+            original.lease
+        ) is False
+
+        assert repository.fail(
+            lease=original.lease,
+            error="Stale worker error",
+        ) is False
+
+        row = db.execute(
+            text("""
+                SELECT status, execution_owner,
+                       lease_version, last_error
+                FROM dbo.research_jobs
+                WHERE id = :job_id
+            """),
+            {
+                "job_id": job_id,
+            },
+        ).one()
+
+        assert row[0] == "claimed"
+        assert row[1] == recovered.lease.owner
+        assert row[2] == recovered.lease.version
+        assert row[3] is None

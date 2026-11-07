@@ -1,5 +1,5 @@
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -21,7 +21,10 @@ def heartbeat():
         job_id="test-job",
         owner="test-worker",
         version=1,
-        expires_at=datetime.now(timezone.utc),
+        expires_at=(
+            datetime.now(timezone.utc)
+            + timedelta(minutes=5)
+        ),
     )
 
     session_factory = MagicMock()
@@ -147,7 +150,93 @@ def test_heartbeat_starts_only_once(
         heartbeat.stop()
 
 
-def test_heartbeat_stop_propagates_lease_loss(
+def test_heartbeat_stop_preserves_lease_loss(
+    heartbeat,
+):
+
+    heartbeat._failure = (
+        "Research job lease renewal was rejected."
+    )
+
+    heartbeat._lost_event.set()
+
+    heartbeat.stop()
+
+    with pytest.raises(
+        ResearchJobLeaseLost,
+        match="renewal was rejected",
+    ):
+
+        heartbeat.check()
+
+
+def test_heartbeat_detects_expired_lease():
+
+    lease = ResearchJobLease(
+        job_id="test-job",
+        owner="test-worker",
+        version=1,
+        expires_at=(
+            datetime.now(timezone.utc)
+            - timedelta(seconds=10)
+        ),
+    )
+
+    heartbeat = ResearchJobHeartbeat(
+        session_factory=MagicMock(),
+        lease=lease,
+    )
+
+    with pytest.raises(
+        ResearchJobLeaseLost,
+        match="has expired",
+    ):
+
+        heartbeat.check()
+
+
+def test_heartbeat_renews_lease(
+    heartbeat,
+):
+
+    original_lease = heartbeat.lease
+
+    renewed_lease = ResearchJobLease(
+        job_id="test-job",
+        owner="test-worker",
+        version=1,
+        expires_at=(
+            datetime.now(timezone.utc)
+            + timedelta(minutes=10)
+        ),
+    )
+
+    heartbeat._stop_event.wait = MagicMock(
+        side_effect=[False, True],
+    )
+
+    with patch(
+        "application.research_job_heartbeat."
+        "ResearchJobRepository"
+    ) as repository_class:
+
+        repository = repository_class.return_value
+
+        repository.renew.return_value = renewed_lease
+
+        heartbeat._run()
+
+        repository.renew.assert_called_once_with(
+            original_lease,
+            duration_seconds=120,
+        )
+
+    assert heartbeat.lease == renewed_lease
+
+    heartbeat.check()
+
+
+def test_heartbeat_stop_does_not_mask_exception(
     heartbeat,
 ):
 
@@ -158,7 +247,16 @@ def test_heartbeat_stop_propagates_lease_loss(
     heartbeat._lost_event.set()
 
     with pytest.raises(
-        ResearchJobLeaseLost,
+        RuntimeError,
+        match="Original workflow failure",
     ):
 
-        heartbeat.stop()
+        try:
+
+            raise RuntimeError(
+                "Original workflow failure"
+            )
+
+        finally:
+
+            heartbeat.stop()

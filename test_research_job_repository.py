@@ -254,3 +254,124 @@ def test_claim_next_rolls_back_on_database_failure():
         repository.claim_next()
 
     db.rollback.assert_called_once()
+
+
+def test_complete_returns_true_when_successful():
+
+    db = MagicMock()
+
+    db.execute.return_value.first.return_value = (
+        "job-123",
+    )
+
+    repository = ResearchJobRepository(db)
+
+    lease = ResearchJobLease(
+        job_id="job-123",
+        owner="owner-123",
+        version=2,
+        expires_at=datetime(2026, 11, 5, 12, 0, 0),
+    )
+
+    completed = repository.complete(
+        lease
+    )
+
+    assert completed is True
+
+    db.commit.assert_called_once()
+
+
+def test_complete_returns_false_when_rejected():
+
+    db = MagicMock()
+
+    db.execute.return_value.first.return_value = None
+
+    repository = ResearchJobRepository(db)
+
+    lease = ResearchJobLease(
+        job_id="job-123",
+        owner="old-owner",
+        version=1,
+        expires_at=datetime(2026, 11, 5, 12, 0, 0),
+    )
+
+    completed = repository.complete(
+        lease
+    )
+
+    assert completed is False
+
+
+def test_fail_returns_true_when_successful():
+
+    db = MagicMock()
+
+    db.execute.return_value.first.return_value = (
+        "job-123",
+    )
+
+    repository = ResearchJobRepository(db)
+
+    lease = ResearchJobLease(
+        job_id="job-123",
+        owner="owner-123",
+        version=2,
+        expires_at=datetime(2026, 11, 5, 12, 0, 0),
+    )
+
+    failed = repository.fail(
+        lease=lease,
+        error="Research execution failed.",
+    )
+
+    assert failed is True
+
+    db.commit.assert_called_once()
+
+
+def test_fail_returns_false_for_stale_lease():
+
+    db = MagicMock()
+
+    db.execute.return_value.first.return_value = None
+
+    repository = ResearchJobRepository(db)
+
+    lease = ResearchJobLease(
+        job_id="job-123",
+        owner="old-owner",
+        version=1,
+        expires_at=datetime(2026, 11, 5, 12, 0, 0),
+    )
+
+    failed = repository.fail(
+        lease=lease,
+        error="Execution failed.",
+    )
+
+    assert failed is False
+
+
+def test_fail_rejects_empty_error():
+
+    db = MagicMock()
+
+    repository = ResearchJobRepository(db)
+
+    lease = ResearchJobLease(
+        job_id="job-123",
+        owner="owner-123",
+        version=2,
+        expires_at=datetime(2026, 11, 5, 12, 0, 0),
+    )
+
+    with pytest.raises(ValueError):
+
+        repository.fail(
+            lease=lease,
+            error=" ",
+        )
+
+    db.execute.assert_not_called()

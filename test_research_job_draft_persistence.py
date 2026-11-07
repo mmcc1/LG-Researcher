@@ -739,31 +739,22 @@ def test_question_add_respects_job_row_lock(
 
                 db.execute(
                     text("""
-                        SELECT id
-                        FROM dbo.research_jobs
-                            WITH (UPDLOCK, HOLDLOCK)
+                        SELECT
+                            id,
+                            user_id,
+                            status,
+                            research_session_id,
+                            submitted_at
+                        FROM dbo.research_jobs WITH (
+                            UPDLOCK,
+                            HOLDLOCK
+                        )
                         WHERE id = :job_id
                     """),
                     {
                         "job_id": job_id,
                     },
-                ).scalar_one()
-
-                connection_info = db.execute(
-                    text("""
-                        SELECT
-                            @@SPID AS session_id,
-                            @@TRANCOUNT AS transaction_count,
-                            DB_NAME() AS database_name,
-                            @@OPTIONS AS session_options
-                    """)
                 ).one()
-
-                print(
-                    "\nLock holder connection:",
-                    connection_info,
-                    flush=True,
-                )
 
                 lock_acquired.set()
 
@@ -810,47 +801,24 @@ def test_question_add_respects_job_row_lock(
                         text("SET LOCK_TIMEOUT 1000")
                     )
 
-                    connection_info = db.execute(
-                        text("""
-                            SELECT
-                                @@SPID AS session_id,
-                                @@TRANCOUNT AS transaction_count,
-                                DB_NAME() AS database_name,
-                                @@OPTIONS AS session_options
-                        """)
-                    ).one()
-
-                    print(
-                        "\nQuestion writer connection:",
-                        connection_info,
-                        flush=True,
-                    )
-
-                    # Diagnostic: request the same update lock
-                    # from an independent SQL Server session.
                     with pytest.raises(DBAPIError):
 
-                        db.execute(
-                            text("""
-                                SELECT id
-                                FROM dbo.research_jobs
-                                    WITH (UPDLOCK, HOLDLOCK)
-                                WHERE id = :job_id
-                            """),
-                            {
-                                "job_id": job_id,
-                            },
-                        ).scalar_one()
+                        ResearchJobRepository(
+                            db
+                        ).add_draft_question(
+                            job_id=job_id,
+                            user_id=user_id,
+                            question="Blocked question",
+                        )
 
                 finally:
 
                     db.rollback()
 
-                    # LOCK_TIMEOUT is a connection-level setting;
-                    # restore the default before pooling the connection.
                     db.execute(
                         text("SET LOCK_TIMEOUT -1")
                     )
+
                     db.commit()
 
         finally:
@@ -869,3 +837,238 @@ def test_question_add_respects_job_row_lock(
         )
 
     assert questions == []
+
+    # Once the competing transaction releases its lock,
+    # the repository must be able to add the question.
+
+    with SessionLocal() as db:
+
+        repository = ResearchJobRepository(db)
+
+        question_id = repository.add_draft_question(
+            job_id=job_id,
+            user_id=user_id,
+            question="Question added after lock release",
+        )
+
+    assert question_id is not None
+
+    with SessionLocal() as db:
+
+        repository = ResearchJobRepository(db)
+
+        questions = repository.list_draft_questions(
+            job_id=job_id,
+            user_id=user_id,
+        )
+
+    assert len(questions) == 1
+    assert questions[0].id == question_id
+    assert questions[0].question == (
+        "Question added after lock release"
+    )
+
+
+    
+def test_submission_waits_for_question_insertion(
+    test_users,
+):
+
+    user_id, _ = test_users
+
+    job_id = create_test_draft(user_id)
+
+    insertion_ready = Event()
+    release_insertion = Event()
+
+    question_text = (
+        "Question committed before submission"
+    )
+
+    def insert_question_and_hold_transaction():
+
+        with SessionLocal() as db:
+
+            try:
+
+                # Acquire the same parent-job lock used by
+                # add_draft_question(), and retain it until
+                # the question insertion is committed.
+
+                row = db.execute(
+                    text("""
+                        SELECT
+                            id,
+                            user_id,
+                            status,
+                            research_session_id,
+                            submitted_at
+                        FROM dbo.research_jobs WITH (
+                            UPDLOCK,
+                            HOLDLOCK
+                        )
+                        WHERE id = :job_id
+                    """),
+                    {
+                        "job_id": job_id,
+                    },
+                ).one()
+
+                assert row[1] == user_id
+                assert row[2] == "draft"
+                assert row[3] is None
+                assert row[4] is None
+
+                now = datetime.now(
+                    timezone.utc
+                ).replace(
+                    tzinfo=None
+                )
+
+                # Insert without committing. The repository
+                # normally performs this operation inside
+                # its own transaction.
+
+                question_id = db.execute(
+                    text("""
+                        INSERT INTO dbo.research_job_questions (
+                            research_job_id,
+                            question,
+                            created_at
+                        )
+                        OUTPUT INSERTED.id
+                        VALUES (
+                            :job_id,
+                            :question,
+                            :created_at
+                        )
+                    """),
+                    {
+                        "job_id": job_id,
+                        "question": question_text,
+                        "created_at": now,
+                    },
+                ).scalar_one()
+
+                insertion_ready.set()
+
+                if not release_insertion.wait(timeout=15):
+
+                    raise RuntimeError(
+                        "Timed out waiting to commit "
+                        "the question insertion."
+                    )
+
+                db.commit()
+
+                return question_id
+
+            except Exception:
+
+                db.rollback()
+                raise
+
+    with ThreadPoolExecutor(
+        max_workers=1
+    ) as executor:
+
+        future = executor.submit(
+            insert_question_and_hold_transaction
+        )
+
+        try:
+
+            if not insertion_ready.wait(timeout=10):
+
+                if future.done():
+
+                    future.result()
+
+                pytest.fail(
+                    "Question insertion did not reach "
+                    "the uncommitted state."
+                )
+
+            # The question has been inserted, but its
+            # transaction has not yet committed.
+            #
+            # Submission must not be allowed to complete
+            # while the insertion holds the parent lock.
+
+            with SessionLocal() as db:
+
+                try:
+
+                    db.execute(
+                        text("SET LOCK_TIMEOUT 1000")
+                    )
+
+                    with pytest.raises(DBAPIError):
+
+                        ResearchJobRepository(
+                            db
+                        ).submit_draft(
+                            job_id=job_id,
+                            user_id=user_id,
+                        )
+
+                finally:
+
+                    db.rollback()
+
+                    db.execute(
+                        text("SET LOCK_TIMEOUT -1")
+                    )
+
+                    db.commit()
+
+        finally:
+
+            release_insertion.set()
+
+        question_id = future.result(timeout=15)
+
+    # The insertion has now committed. The job should
+    # still be a draft because the competing submission
+    # timed out.
+
+    job = load_job(job_id)
+
+    assert job.status == "draft"
+    assert job.submitted_at is None
+
+    # Submission should now succeed.
+
+    with SessionLocal() as db:
+
+        repository = ResearchJobRepository(db)
+
+        submitted = repository.submit_draft(
+            job_id=job_id,
+            user_id=user_id,
+        )
+
+    assert submitted is True
+
+    job = load_job(job_id)
+
+    assert job.status == "queued"
+    assert job.submitted_at is not None
+
+    # The question inserted before submission must
+    # remain associated with the submitted job.
+
+    with SessionLocal() as db:
+
+        repository = ResearchJobRepository(db)
+
+        questions = repository.list_draft_questions(
+            job_id=job_id,
+            user_id=user_id,
+        )
+
+    assert len(questions) == 1
+    assert questions[0].id == question_id
+    assert questions[0].research_job_id == job_id
+    assert questions[0].question == question_text
+

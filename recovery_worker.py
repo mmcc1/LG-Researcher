@@ -1,26 +1,3 @@
-
-"""
-Standalone operational recovery worker.
-
-Commands:
-
-    python recovery_worker.py --once --limit 25
-
-    python recovery_worker.py --once --session-id UUID
-
-    python recovery_worker.py --continuous --interval 30 --limit 25
-
-    python recovery_worker.py --continuous --interval 30 --limit 25 \
-        --health-file runtime/recovery-health.json
-
-Exit codes:
-
-    0 - Completed normally
-    1 - One or more recovery sessions failed (single cycle)
-    2 - Initialization or coordinator failure
-    3 - Targeted recovery skipped
-"""
-
 import argparse
 import logging
 import math

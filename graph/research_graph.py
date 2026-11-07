@@ -162,6 +162,9 @@ def create_research_graph(
     search_provider: SearchProvider,
     document_retriever: DocumentRetriever,
     document_extractor: HtmlDocumentExtractor,
+    interrupt_after: list[str] | None = None,
+    checkpointer=None,
+    interrupt_before: list[str] | None = None,
 ):
 
     #
@@ -917,7 +920,11 @@ def create_research_graph(
         END,
     )
 
-    return builder.compile()
+    return builder.compile(
+        interrupt_before=interrupt_before,
+        interrupt_after=interrupt_after,
+        checkpointer=checkpointer,
+    )
 
 
 def route_after_question_selection(
