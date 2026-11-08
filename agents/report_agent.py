@@ -68,6 +68,29 @@ Each report section must identify the reviewed claims
 that support that section using the
 reviewed_claim_ids field.
 
+A report section containing factual research conclusions
+must reference the reviewed claims supporting those
+conclusions.
+
+If no reviewed claims support a subject, do not
+invent conclusions about that subject.
+
+You may include a section describing insufficient
+evidence, unresolved questions, or evidence gaps
+without reviewed claim references.
+
+Such a section must clearly communicate the
+limitation and must not assert unsupported factual
+conclusions.
+
+If the entire research material contains no reviewed
+claims, produce a report that explicitly communicates
+the absence of sufficient evidence. Do not invent
+research findings or conclusions.
+
+Ensure that material evidence gaps are included in
+the report limitations.
+
 Every value in reviewed_claim_ids must be a
 REVIEWED CLAIM ID explicitly present in the supplied
 research material.

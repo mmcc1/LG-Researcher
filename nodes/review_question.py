@@ -33,6 +33,10 @@ from persistence.execution_lease_repository import (
     ExecutionLease,
 )
 
+from domain.review import (
+    ResearchQuestionReview,
+)
+
 
 class ReviewQuestionNode:
 
@@ -199,11 +203,58 @@ class ReviewQuestionNode:
 
             if not findings:
 
-                raise ValueError(
+                print()
+                print(
                     "No findings exist for "
-                    "research question "
-                    f"{question_id}."
+                    f"research question {question_id}."
                 )
+
+                print(
+                    "Persisting an insufficient-evidence "
+                    "review without invoking the Review Agent."
+                )
+
+                review = ResearchQuestionReview(
+                    answer=(
+                        "Insufficient evidence to answer "
+                        "the research question."
+                    ),
+                    reviewed_claims=[],
+                    contradictions=[],
+                    evidence_gaps=[
+                        (
+                            "No research findings were available "
+                            "for this question."
+                        )
+                    ],
+                    overall_confidence="low",
+                    sufficient_evidence=False,
+                )
+
+                if execution_guard is not None:
+
+                    execution_guard()
+
+                review_id = (
+                    review_repository.save_review_fenced(
+                        session_id=session_id,
+                        question_id=question_id,
+                        review=review,
+                        valid_finding_ids=set(),
+                        lease=lease,
+                    )
+                )
+
+                if execution_guard is not None:
+
+                    execution_guard()
+
+                print(
+                    "Insufficient-evidence review persisted. "
+                    f"Review ID: {review_id}"
+                )
+
+                return {}
 
             source_ids = {
                 finding.source_id

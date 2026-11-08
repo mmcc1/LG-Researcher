@@ -931,3 +931,86 @@ class ResearchJobRepository:
             raise
 
         return row is not None
+
+    
+    def retry_failed(
+        self,
+        job_id: str,
+        user_id: str,
+    ) -> bool:
+
+        if (
+            not isinstance(job_id, str)
+            or not job_id.strip()
+        ):
+
+            raise ValueError(
+                "job_id is required"
+            )
+
+        if (
+            not isinstance(user_id, str)
+            or not user_id.strip()
+        ):
+
+            raise ValueError(
+                "user_id is required"
+            )
+
+        job_id = job_id.strip()
+        user_id = user_id.strip()
+
+        statement = text("""
+            UPDATE j
+            SET status = 'queued',
+                submitted_at = SYSUTCDATETIME(),
+                started_at = NULL,
+                completed_at = NULL,
+                last_error = NULL
+            OUTPUT INSERTED.id
+            FROM dbo.research_jobs AS j
+            INNER JOIN dbo.research_sessions AS s
+                ON s.id = j.research_session_id
+            WHERE j.id = :job_id
+              AND j.user_id = :user_id
+              AND j.status = 'failed'
+              AND j.research_session_id IS NOT NULL
+              AND j.execution_owner IS NULL
+              AND j.lease_expires_at IS NULL
+              AND s.pause_requested = 0
+              AND s.status IN (
+                  'created',
+                  'planning',
+                  'planned',
+                  'researching',
+                  'researched',
+                  'reviewing',
+                  'reviewed',
+                  'reporting',
+                  'completed'
+              )
+              AND (
+                s.execution_owner IS NULL
+                OR s.execution_lease_expires_at IS NULL
+                OR s.execution_lease_expires_at <= SYSUTCDATETIME()
+            )
+        """)
+
+        try:
+
+            row = self.db.execute(
+                statement,
+                {
+                    "job_id": job_id,
+                    "user_id": user_id,
+                },
+            ).first()
+
+            self.db.commit()
+
+        except Exception:
+
+            self.db.rollback()
+            raise
+
+        return row is not None

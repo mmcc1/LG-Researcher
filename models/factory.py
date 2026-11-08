@@ -19,6 +19,7 @@ class ChatModelFactory:
                 model_name=settings.model_name,
                 base_url=settings.base_url,
                 temperature=settings.temperature,
+                timeout_seconds=settings.timeout_seconds,
             )
 
             return model_provider.create()

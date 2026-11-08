@@ -13,6 +13,7 @@ class ModelSettings:
     model_name: str
     base_url: str
     temperature: float
+    timeout_seconds: float = 900.0
 
 
 @dataclass(frozen=True)
@@ -59,6 +60,12 @@ def create_model_settings(
             os.getenv(
                 f"{prefix}_TEMPERATURE",
                 "0.2",
+            )
+        ),
+        timeout_seconds=float(
+            os.getenv(
+                f"{prefix}_TIMEOUT_SECONDS",
+                "900",
             )
         ),
     )

@@ -5,6 +5,13 @@ from api.routes.research_jobs import (
     router as research_jobs_router,
 )
 
+from api.routes.auth import (
+    router as auth_router,
+)
+
+from api.routes.admin import (
+    router as admin_router,
+)
 
 app = FastAPI(
     title="LG Researcher API",
@@ -15,6 +22,15 @@ app = FastAPI(
     version="0.1.0",
 )
 
+app.include_router(auth_router)
+
+app.include_router(research_jobs_router)
+
+app.include_router(admin_router)
+
+app.include_router(
+    auth_router
+)
 
 app.include_router(
     research_jobs_router
