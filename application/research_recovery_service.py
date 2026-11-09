@@ -13,6 +13,10 @@ from persistence.research_session_repository import (
     RecoveryNotEligible,
 )
 
+from persistence.research_job_repository import (
+    ResearchJobRepository,
+)
+
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +80,43 @@ class ResearchRecoveryService:
                     "pause_requested"
                 ) is True
             )
+
+            if not paused:
+
+                with self.session_factory() as db:
+
+                    session_repository = ResearchSessionRepository(
+                        db
+                    )
+
+                    research_session = session_repository.get(
+                        session_id
+                    )
+
+                if (
+                    research_session is not None
+                    and research_session.status == "completed"
+                ):
+
+                    with self.session_factory() as db:
+
+                        job_repository = ResearchJobRepository(
+                            db
+                        )
+
+                        reconciled = (
+                            job_repository.reconcile_completed_session(
+                                session_id=session_id,
+                            )
+                        )
+
+                    if reconciled:
+
+                        logger.info(
+                            "Reconciled completed research session %s "
+                            "with its associated research job.",
+                            session_id,
+                        )
 
             return RecoveryOutcome(
                 session_id=session_id,

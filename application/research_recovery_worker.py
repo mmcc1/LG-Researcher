@@ -1,13 +1,4 @@
 
-"""
-Operational recovery worker.
-
-Supports:
-- One bounded batch recovery cycle
-- Recovery of one explicitly selected session
-- Cooperative cancellation between recovery sessions
-"""
-
 import threading
 
 from dataclasses import dataclass

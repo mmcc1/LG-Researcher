@@ -1,0 +1,179 @@
+There are four parts to this software:
+
+recovery_worker.py (a service that heals failures)
+worker.py (performs the main research)
+FAST API (exposes an API to control the researcher)
+Frontend (a web UI for admins and users)
+
+This app uses a MSSQL backend over TCP/IP and requires an SQL account.
+Create a DB, call it 'Researcher' and allow the user account access.
+
+
+Installation Intructions (recovery_worker.py)
+
+1. Create a folder called 'Services' on C:
+2. Create a sub folder called 'LGResearchRecovery'
+3. Create the following folders under LGResearchRecovery:
+    app
+    health
+    logs
+4. Copy source of LGResearcher to the app folder 
+  app folder of service (C:\Services\LGResearchRecovery\app)
+  py -m venv .venv
+  .\.venv\Scripts\python.exe -m pip install --upgrade pip
+  .\.venv\Scripts\python -m pip install -r requirements.txt
+5. Create a .env file and add the following contents (if using Ollama and Qwen3:8b):
+
+PLANNER_PROVIDER=ollama
+PLANNER_MODEL=qwen3:8b
+PLANNER_BASE_URL=http://localhost:11434
+PLANNER_TEMPERATURE=0.2
+PLANNER_TIMEOUT_SECONDS=900
+
+RESEARCHER_PROVIDER=ollama
+RESEARCHER_MODEL=qwen3:8b
+RESEARCHER_BASE_URL=http://localhost:11434
+RESEARCHER_TEMPERATURE=0.2
+RESEARCHER_TIMEOUT_SECONDS=900
+
+SUMMARISER_PROVIDER=ollama
+SUMMARISER_MODEL=qwen3:8b
+SUMMARISER_BASE_URL=http://localhost:11434
+SUMMARISER_TEMPERATURE=0.2
+SUMMARISER_TIMEOUT_SECONDS=900
+
+REVIEWER_PROVIDER=ollama
+REVIEWER_MODEL=qwen3:8b
+REVIEWER_BASE_URL=http://localhost:11434
+REVIEWER_TEMPERATURE=0.2
+REVIEWER_TIMEOUT_SECONDS=900
+
+REPORTER_PROVIDER=ollama
+REPORTER_MODEL=qwen3:8b
+REPORTER_BASE_URL=http://localhost:11434
+REPORTER_TEMPERATURE=0.2
+REPORTER_TIMEOUT_SECONDS=900
+
+CONTROLLER_PROVIDER=ollama
+CONTROLLER_MODEL=qwen3:8b
+CONTROLLER_BASE_URL=http://localhost:11434
+CONTROLLER_TEMPERATURE=0.2
+CONTROLLER_TIMEOUT_SECONDS=900
+
+DB_SERVER=localhost
+DB_PORT=1433
+DB_NAME=Researcher
+DB_USERNAME=<USERNAME>
+DB_PASSWORD=<PASSWORD>
+DB_DRIVER=ODBC Driver 18 for SQL Server
+DB_TRUST_SERVER_CERTIFICATE=yes
+
+6. Download WinSW to LGResearchRecovery
+
+Worker Recovery Service
+
+Uses Windows Service Wrapper
+https://github.com/winsw/winsw
+
+https://github.com/winsw/winsw/releases/download/v2.12.0/WinSW-x64.exe
+
+7. Rename the WinSW-x64.exe to LGResearchRecovery.exe
+
+
+8. Create a file called LGResearchRecovery.xml in the LGResearchRecovery folder.  Replace
+the text with that provided below:
+
+<service>
+  <id>LGResearchRecovery</id>
+  <name>LG Research Recovery Worker</name>
+
+  <description>
+    Continuous recovery coordinator for LG Researcher.
+  </description>
+
+  <executable>%BASE%\app\.venv\Scripts\python.exe</executable>
+
+  <arguments>-u "%BASE%\app\recovery_worker.py" --continuous --interval 10 --limit 25 --health-file "%BASE%\health\recovery-health.json"</arguments>
+
+  <workingdirectory>%BASE%\app</workingdirectory>
+
+  <env name="PYTHONUNBUFFERED" value="1" />
+  <env name="PYTHONUTF8" value="1" />
+
+  <startmode>Automatic</startmode>
+  <delayedAutoStart>true</delayedAutoStart>
+
+  <stoptimeout>5 min</stoptimeout>
+
+  <onfailure action="restart" delay="10 sec"/>
+  <resetfailure>1 hour</resetfailure>
+
+  <logpath>%BASE%\logs</logpath>
+  <log mode="roll-by-size">
+    <sizeThreshold>10485760</sizeThreshold>
+    <keepFiles>10</keepFiles>
+  </log>
+</service>
+
+9. Register and start:
+# Install the Windows service
+.\LGResearchRecovery.exe install
+
+# Start the service
+.\LGResearchRecovery.exe start
+
+# Check service status
+.\LGResearchRecovery.exe status
+
+
+
+worker.py
+Will eventually run as a service.  For now, just execute in a terminal
+
+
+FAST API
+From app root:
+$env:LG_RESEARCHER_API_ENV = "development"
+$env:LG_RESEARCHER_ALLOWED_ORIGINS = "http://localhost:5173,http://127.0.0.1:5173,http://127.0.0.1:8000"
+$env:RESEARCH_RECOVERY_HEALTH_FILE = "C:\Services\LGResearchRecovery\health\recovery-health.json"
+python -m uvicorn api.main:app --reload --host 127.0.0.1 --port 8000
+
+
+React Frontend
+Launch from frontend folder (VITE v8.3.6)
+npm dev run
+
+
+
+Dev notes
+
+
+app folder of service
+.\.venv\Scripts\python -m pip install -r requirements.txt
+
+
+Start-Service -Name LGResearchRecovery
+
+Get-Service -Name LGResearchRecovery
+
+Get-Content ".\health\recovery-health.json" | ConvertFrom-Json | Format-List
+
+Get-ChildItem ".\logs" | Sort-Object LastWriteTime -Descending
+
+.\LGResearchRecovery.exe start
+.\LGResearchRecovery.exe stop
+.\LGResearchRecovery.exe status
+
+
+Operation	    PowerShell command
+Start	        Start-Service -Name LGResearchRecovery
+Stop	        Stop-Service -Name LGResearchRecovery
+Restart	      Restart-Service -Name LGResearchRecovery
+Status	      Get-Service -Name LGResearchRecovery
+
+Targeted Recovery
+python recovery_worker.py --once --session-id 25445ae3-c9c4-49c7-a0c6-04fd748c6b42
+
+
+$destination = "C:\Services\LGResearchRecovery\app" 
+robocopy $source $destination /E /XD .venv .git node_modules __pycache__ .pytest_cache .mypy_cache .ruff_cache frontend tests /XF *.pyc *.pyo *.db

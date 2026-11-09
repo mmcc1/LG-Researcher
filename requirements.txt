@@ -1,9 +1,14 @@
+argon2-cffi==25.1.0
 beautifulsoup4==4.15.0
 ddgs==9.16.1
+fastapi==0.162.2
 httpx==0.28.1
 langchain_core==1.7.6
 langchain_ollama==1.1.0
 langgraph==1.2.20
-pydantic==2.14.2
+pydantic==2.14.3
+pyodbc==5.4.0
+pytest==9.2.0
 python-dotenv==1.2.4
+Requests==2.34.2
 SQLAlchemy==2.1.8

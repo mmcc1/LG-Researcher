@@ -87,6 +87,31 @@ export async function rejectUser(
 }
 
 
+export async function enableUser(
+    userId: string,
+): Promise<AdminAction> {
+
+    return await request<AdminAction>(
+        `/api/admin/users/${encodeURIComponent(userId)}/enable`,
+        {
+            method: "POST",
+        },
+    );
+}
+
+
+export async function disableUser(
+    userId: string,
+): Promise<AdminAction> {
+
+    return await request<AdminAction>(
+        `/api/admin/users/${encodeURIComponent(userId)}/disable`,
+        {
+            method: "POST",
+        },
+    );
+}
+
 export interface AdminResearchJob {
 
     id: string;
@@ -133,6 +158,7 @@ export async function listAdminResearchJobs(
     jobStatus: string | null = null,
     limit: number = 50,
     offset: number = 0,
+    signal?: AbortSignal,
 ): Promise<AdminResearchJobList> {
 
     const parameters = new URLSearchParams({
@@ -150,15 +176,60 @@ export async function listAdminResearchJobs(
 
     return await request<AdminResearchJobList>(
         `/api/admin/research/jobs?${parameters.toString()}`,
+        {
+            signal,
+        },
     );
 }
 
 
-export async function getAdminResearchJobSummary():
-    Promise<AdminResearchJobSummary> {
+export async function getAdminResearchJobSummary(
+    signal?: AbortSignal,
+): Promise<AdminResearchJobSummary> {
 
     return await request<AdminResearchJobSummary>(
         "/api/admin/research/jobs/summary",
+        {
+            signal,
+        },
     );
 }
 
+
+export interface AdminRecoveryHealthSnapshot {
+
+    state: string;
+    pid: number;
+    started_at: string;
+    updated_at: string;
+    last_cycle_at: string | null;
+    last_success_at: string | null;
+    last_cycle_duration_seconds: number | null;
+    cycles: number;
+    resumed: number;
+    paused: number;
+    skipped: number;
+    failed_sessions: number;
+    cycle_errors: number;
+    last_error: string | null;
+}
+
+
+export interface AdminRecoveryHealthResponse {
+
+    available: boolean;
+    health: AdminRecoveryHealthSnapshot | null;
+}
+
+
+export async function getAdminRecoveryHealth(
+    signal?: AbortSignal,
+): Promise<AdminRecoveryHealthResponse> {
+
+    return await request<AdminRecoveryHealthResponse>(
+        "/api/admin/recovery/health",
+        {
+            signal,
+        },
+    );
+}

@@ -27,6 +27,8 @@ connection_url = URL.create(
 engine = create_engine(
     connection_url,
     echo=False,
+    pool_pre_ping=True,
+    pool_recycle=1800,
 )
 
 

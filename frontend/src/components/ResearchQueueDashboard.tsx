@@ -2,6 +2,7 @@
 import {
     useCallback,
     useEffect,
+    useRef,
     useState,
 } from "react";
 
@@ -65,9 +66,21 @@ export function ResearchQueueDashboard() {
 
     const [refreshVersion, setRefreshVersion] = useState(0);
 
+    const [autoRefresh, setAutoRefresh] = useState(
+        true
+    );
+
+    const [refreshInterval, setRefreshInterval] = useState(
+        10
+    );
+
+    const loadingRef = useRef(false);
+
 
     const loadJobs = useCallback(
         async (signal: AbortSignal) => {
+
+            loadingRef.current = true;
 
             setLoading(true);
             setError(null);
@@ -86,8 +99,11 @@ export function ResearchQueueDashboard() {
                             jobStatus,
                             PAGE_SIZE,
                             offset,
+                            signal,
                         ),
-                        getAdminResearchJobSummary(),
+                        getAdminResearchJobSummary(
+                            signal,
+                        ),
                     ]);
 
                 if (signal.aborted) {
@@ -113,6 +129,9 @@ export function ResearchQueueDashboard() {
             } finally {
 
                 if (!signal.aborted) {
+
+                    loadingRef.current = false;
+
                     setLoading(false);
                 }
             }
@@ -128,10 +147,45 @@ export function ResearchQueueDashboard() {
         void loadJobs(controller.signal);
 
         return () => {
+
             controller.abort();
+
+            loadingRef.current = false;
         };
 
     }, [loadJobs, refreshVersion]);
+
+
+    useEffect(() => {
+
+        if (!autoRefresh) {
+            return;
+        }
+
+        const intervalId = window.setInterval(
+            () => {
+
+                if (document.visibilityState !== "visible") {
+                    return;
+                }
+
+                if (loadingRef.current) {
+                    return;
+                }
+
+                setRefreshVersion(
+                    (current) => current + 1
+                );
+
+            },
+            refreshInterval * 1000,
+        );
+
+        return () => {
+            window.clearInterval(intervalId);
+        };
+
+    }, [autoRefresh, refreshInterval]);
 
 
     function refresh() {
@@ -258,6 +312,43 @@ export function ResearchQueueDashboard() {
                         </option>
 
                     ))}
+                </select>
+
+                <label htmlFor="queue-auto-refresh">
+
+                    <input
+                        id="queue-auto-refresh"
+                        type="checkbox"
+                        checked={autoRefresh}
+                        onChange={(event) => {
+                            setAutoRefresh(
+                                event.target.checked
+                            );
+                        }}
+                    />
+
+                    Automatic refresh
+
+                </label>
+
+                <label htmlFor="queue-refresh-interval">
+                    Refresh every
+                </label>
+
+                <select
+                    id="queue-refresh-interval"
+                    value={refreshInterval}
+                    disabled={!autoRefresh}
+                    onChange={(event) => {
+                        setRefreshInterval(
+                            Number(event.target.value)
+                        );
+                    }}
+                >
+                    <option value={5}>5 seconds</option>
+                    <option value={10}>10 seconds</option>
+                    <option value={30}>30 seconds</option>
+                    <option value={60}>60 seconds</option>
                 </select>
 
             </div>

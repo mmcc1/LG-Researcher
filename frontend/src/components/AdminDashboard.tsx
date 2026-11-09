@@ -11,6 +11,8 @@ import type {
 
 import {
     approveUser,
+    disableUser,
+    enableUser,
     listAdminUsers,
     rejectUser,
 } from "../api/admin";
@@ -19,11 +21,15 @@ import {
     ResearchQueueDashboard,
 } from "./ResearchQueueDashboard";
 
+import {
+    RecoveryWorkerDashboard,
+} from "./RecoveryWorkerDashboard";
+
 
 export function AdminDashboard() {
 
     const [adminView, setAdminView] = useState<
-        "users" | "research"
+        "users" | "research" | "recovery"
     >("users");
 
     const [users, setUsers] = useState<
@@ -144,6 +150,55 @@ export function AdminDashboard() {
     }
 
 
+    async function changeUserState(
+        userId: string,
+        action: "enable" | "disable",
+    ) {
+
+        const confirmed = window.confirm(
+            action === "enable"
+                ? "Enable this user account?"
+                : (
+                    "Disable this user account? " +
+                    "All existing sessions will be revoked."
+                )
+        );
+
+        if (!confirmed) {
+            return;
+        }
+
+        setBusyUserId(userId);
+        setError(null);
+        setNotice(null);
+
+        try {
+
+            const result = (
+                action === "enable"
+                    ? await enableUser(userId)
+                    : await disableUser(userId)
+            );
+
+            setNotice(result.message);
+
+            await loadUsers();
+
+        } catch (error) {
+
+            setError(
+                error instanceof Error
+                    ? error.message
+                    : "Unable to change user account state."
+            );
+
+        } finally {
+
+            setBusyUserId(null);
+        }
+    }
+
+
     return (
         <div className="app-shell">
 
@@ -173,232 +228,304 @@ export function AdminDashboard() {
                         Research Queue
                     </button>
 
+                    <button
+                        type="button"
+                        className="button secondary"
+                        aria-pressed={adminView === "recovery"}
+                        onClick={() => {
+                            setAdminView("recovery");
+                        }}
+                    >
+                        Recovery Worker
+                    </button>
+
                 </div>
 
                 {adminView === "research" ? (
 
                     <ResearchQueueDashboard />
 
+                ) : adminView === "recovery" ? (
+
+                    <RecoveryWorkerDashboard />
+
                 ) : (
 
                     <section className="panel">
 
-                    <div className="section-header">
+                        <div className="section-header">
 
-                        <div>
-                            <h2>User administration</h2>
+                            <div>
+                                <h2>User administration</h2>
 
-                            <p>
-                                Review registrations and
-                                inspect user accounts.
-                            </p>
+                                <p>
+                                    Review registrations and
+                                    inspect user accounts.
+                                </p>
+                            </div>
+
+                            <button
+                                type="button"
+                                className="button secondary"
+                                onClick={() => {
+                                    void loadUsers();
+                                }}
+                                disabled={loading}
+                            >
+                                Refresh
+                            </button>
+
                         </div>
 
-                        <button
-                            className="button secondary"
-                            onClick={() => {
-                                void loadUsers();
+                        {error && (
+                            <div
+                                className="message error"
+                                role="alert"
+                            >
+                                {error}
+                            </div>
+                        )}
+
+                        {notice && (
+                            <div
+                                className="message success"
+                                role="status"
+                            >
+                                {notice}
+                            </div>
+                        )}
+
+                        <label htmlFor="user-filter">
+                            Account status
+                        </label>
+
+                        <select
+                            id="user-filter"
+                            value={filter}
+                            onChange={(event) => {
+                                setOffset(0);
+                                setFilter(event.target.value);
                             }}
-                            disabled={loading}
                         >
-                            Refresh
-                        </button>
+                            <option value="pending">
+                                Pending approval
+                            </option>
+                            <option value="approved">
+                                Approved
+                            </option>
+                            <option value="rejected">
+                                Rejected
+                            </option>
+                            <option value="all">
+                                All users
+                            </option>
+                        </select>
 
-                    </div>
+                        {loading ? (
+                            <p>Loading users...</p>
+                        ) : (
+                            <div className="table-wrapper">
 
-                    {error && (
-                        <div
-                            className="message error"
-                            role="alert"
-                        >
-                            {error}
-                        </div>
-                    )}
-
-                    {notice && (
-                        <div
-                            className="message success"
-                            role="status"
-                        >
-                            {notice}
-                        </div>
-                    )}
-
-                    <label htmlFor="user-filter">
-                        Account status
-                    </label>
-
-                    <select
-                        id="user-filter"
-                        value={filter}
-                        onChange={(event) => {
-                            setOffset(0);
-                            setFilter(event.target.value);
-                        }}
-                    >
-                        <option value="pending">
-                            Pending approval
-                        </option>
-                        <option value="approved">
-                            Approved
-                        </option>
-                        <option value="rejected">
-                            Rejected
-                        </option>
-                        <option value="all">
-                            All users
-                        </option>
-                    </select>
-
-                    {loading ? (
-                        <p>Loading users...</p>
-                    ) : (
-                        <div className="table-wrapper">
-
-                            <table>
-                                <thead>
-                                    <tr>
-                                        <th>Username</th>
-                                        <th>Role</th>
-                                        <th>Status</th>
-                                        <th>Active</th>
-                                        <th>Created</th>
-                                        <th>Actions</th>
-                                    </tr>
-                                </thead>
-
-                                <tbody>
-
-                                    {users.map((user) => (
-                                        <tr key={user.id}>
-
-                                            <td>{user.username}</td>
-
-                                            <td>{user.role}</td>
-
-                                            <td>
-                                                {user.approval_status}
-                                            </td>
-
-                                            <td>
-                                                {user.is_active
-                                                    ? "Yes"
-                                                    : "No"}
-                                            </td>
-
-                                            <td>
-                                                {new Date(
-                                                    user.created_at
-                                                ).toLocaleString()}
-                                            </td>
-
-                                            <td>
-                                                {user.approval_status
-                                                    === "pending" &&
-                                                    user.role === "user" && (
-                                                    <div className="button-group">
-
-                                                        <button
-                                                            className="button primary small"
-                                                            disabled={
-                                                                busyUserId !== null
-                                                            }
-                                                            onClick={() => {
-                                                                void reviewUser(
-                                                                    user.id,
-                                                                    "approve",
-                                                                );
-                                                            }}
-                                                        >
-                                                            Approve
-                                                        </button>
-
-                                                        <button
-                                                            className="button danger small"
-                                                            disabled={
-                                                                busyUserId !== null
-                                                            }
-                                                            onClick={() => {
-                                                                void reviewUser(
-                                                                    user.id,
-                                                                    "reject",
-                                                                );
-                                                            }}
-                                                        >
-                                                            Reject
-                                                        </button>
-
-                                                    </div>
-                                                )}
-                                            </td>
-
-                                        </tr>
-                                    ))}
-
-                                    {users.length === 0 && (
+                                <table>
+                                    <thead>
                                         <tr>
-                                            <td
-                                                colSpan={6}
-                                                className="empty"
-                                            >
-                                                No users found.
-                                            </td>
+                                            <th>Username</th>
+                                            <th>Role</th>
+                                            <th>Status</th>
+                                            <th>Active</th>
+                                            <th>Created</th>
+                                            <th>Actions</th>
                                         </tr>
-                                    )}
+                                    </thead>
 
-                                </tbody>
-                            </table>
+                                    <tbody>
+
+                                        {users.map((user) => (
+                                            <tr key={user.id}>
+
+                                                <td>{user.username}</td>
+
+                                                <td>{user.role}</td>
+
+                                                <td>
+                                                    {user.approval_status}
+                                                </td>
+
+                                                <td>
+                                                    {user.is_active
+                                                        ? "Yes"
+                                                        : "No"}
+                                                </td>
+
+                                                <td>
+                                                    {new Date(
+                                                        user.created_at
+                                                    ).toLocaleString()}
+                                                </td>
+
+                                                <td>
+
+                                                    {user.approval_status
+                                                        === "pending" &&
+                                                        user.role === "user" && (
+
+                                                        <div className="button-group">
+
+                                                            <button
+                                                                type="button"
+                                                                className="button primary small"
+                                                                disabled={
+                                                                    busyUserId !== null
+                                                                }
+                                                                onClick={() => {
+                                                                    void reviewUser(
+                                                                        user.id,
+                                                                        "approve",
+                                                                    );
+                                                                }}
+                                                            >
+                                                                Approve
+                                                            </button>
+
+                                                            <button
+                                                                type="button"
+                                                                className="button danger small"
+                                                                disabled={
+                                                                    busyUserId !== null
+                                                                }
+                                                                onClick={() => {
+                                                                    void reviewUser(
+                                                                        user.id,
+                                                                        "reject",
+                                                                    );
+                                                                }}
+                                                            >
+                                                                Reject
+                                                            </button>
+
+                                                        </div>
+
+                                                    )}
+
+                                                    {user.approval_status
+                                                        === "approved" &&
+                                                        user.role === "user" && (
+
+                                                        <div className="button-group">
+
+                                                            {user.is_active ? (
+
+                                                                <button
+                                                                    type="button"
+                                                                    className="button danger small"
+                                                                    disabled={
+                                                                        busyUserId !== null
+                                                                    }
+                                                                    onClick={() => {
+                                                                        void changeUserState(
+                                                                            user.id,
+                                                                            "disable",
+                                                                        );
+                                                                    }}
+                                                                >
+                                                                    Disable
+                                                                </button>
+
+                                                            ) : (
+
+                                                                <button
+                                                                    type="button"
+                                                                    className="button primary small"
+                                                                    disabled={
+                                                                        busyUserId !== null
+                                                                    }
+                                                                    onClick={() => {
+                                                                        void changeUserState(
+                                                                            user.id,
+                                                                            "enable",
+                                                                        );
+                                                                    }}
+                                                                >
+                                                                    Enable
+                                                                </button>
+
+                                                            )}
+
+                                                        </div>
+
+                                                    )}
+
+                                                </td>
+
+                                            </tr>
+                                        ))}
+
+                                        {users.length === 0 && (
+                                            <tr>
+                                                <td
+                                                    colSpan={6}
+                                                    className="empty"
+                                                >
+                                                    No users found.
+                                                </td>
+                                            </tr>
+                                        )}
+
+                                    </tbody>
+                                </table>
+
+                            </div>
+                        )}
+
+                        <div className="pagination">
+
+                            <span>
+                                {total} users
+                            </span>
+
+                            <div className="button-group">
+
+                                <button
+                                    type="button"
+                                    className="button secondary"
+                                    disabled={
+                                        loading || offset === 0
+                                    }
+                                    onClick={() => {
+                                        setOffset(
+                                            Math.max(
+                                                0,
+                                                offset - pageSize,
+                                            )
+                                        );
+                                    }}
+                                >
+                                    Previous
+                                </button>
+
+                                <button
+                                    type="button"
+                                    className="button secondary"
+                                    disabled={
+                                        loading ||
+                                        offset + pageSize >= total
+                                    }
+                                    onClick={() => {
+                                        setOffset(
+                                            offset + pageSize
+                                        );
+                                    }}
+                                >
+                                    Next
+                                </button>
+
+                            </div>
 
                         </div>
-                    )}
 
-                    <div className="pagination">
+                    </section>
 
-                        <span>
-                            {total} users
-                        </span>
-
-                        <div className="button-group">
-
-                            <button
-                                className="button secondary"
-                                disabled={
-                                    loading || offset === 0
-                                }
-                                onClick={() => {
-                                    setOffset(
-                                        Math.max(
-                                            0,
-                                            offset - pageSize,
-                                        )
-                                    );
-                                }}
-                            >
-                                Previous
-                            </button>
-
-                            <button
-                                className="button secondary"
-                                disabled={
-                                    loading ||
-                                    offset + pageSize >= total
-                                }
-                                onClick={() => {
-                                    setOffset(
-                                        offset + pageSize
-                                    );
-                                }}
-                            >
-                                Next
-                            </button>
-
-                        </div>
-
-                    </div>
-                    
-                </section>
-
-            )}
+                )}
 
             </main>
 

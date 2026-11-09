@@ -560,6 +560,16 @@ class ResearchJobRepository:
                         AND lease_expires_at <= SYSUTCDATETIME()
                     )
                 )
+                AND (
+                    research_session_id IS NULL
+                    OR NOT EXISTS (
+                        SELECT 1
+                        FROM dbo.research_sessions AS s
+                        WHERE s.id = research_session_id
+                        AND s.execution_owner IS NOT NULL
+                        AND s.execution_lease_expires_at > SYSUTCDATETIME()
+                    )
+                )
                 ORDER BY submitted_at, id
             )
             UPDATE next_job
@@ -864,6 +874,62 @@ class ResearchJobRepository:
                     "job_id": lease.job_id,
                     "owner": lease.owner,
                     "version": lease.version,
+                },
+            ).first()
+
+            self.db.commit()
+
+        except Exception:
+
+            self.db.rollback()
+            raise
+
+        return row is not None
+
+
+    def reconcile_completed_session(
+        self,
+        session_id: str,
+    ) -> bool:
+
+        if (
+            not isinstance(session_id, str)
+            or not session_id.strip()
+        ):
+
+            raise ValueError(
+                "session_id is required"
+            )
+
+        session_id = session_id.strip()
+
+        statement = text("""
+            UPDATE j
+            SET status = 'completed',
+                completed_at = SYSUTCDATETIME(),
+                execution_owner = NULL,
+                lease_expires_at = NULL,
+                lease_version = lease_version + 1,
+                last_error = NULL
+            OUTPUT INSERTED.id
+            FROM dbo.research_jobs AS j
+            INNER JOIN dbo.research_sessions AS s
+                ON s.id = j.research_session_id
+            WHERE j.research_session_id = :session_id
+              AND j.status = 'claimed'
+              AND (
+                    j.lease_expires_at IS NULL
+                    OR j.lease_expires_at <= SYSUTCDATETIME()
+                  )
+              AND s.status = 'completed'
+        """)
+
+        try:
+
+            row = self.db.execute(
+                statement,
+                {
+                    "session_id": session_id,
                 },
             ).first()
 

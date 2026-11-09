@@ -1,6 +1,9 @@
 
 import json
+import os
+import math
 
+from pathlib import Path
 from uuid import uuid4
 
 from fastapi import (
@@ -30,6 +33,7 @@ from persistence.models import (
     AdminAuditLog,
     ResearchJob,
     UserAccount,
+    UserSession,
 )
 
 from api.schemas.admin import (
@@ -40,6 +44,14 @@ from api.schemas.admin import (
     AdminResearchJobSummaryResponse,
     AdminUserListResponse,
     AdminUserResponse,
+)
+
+from sqlalchemy import (
+    false,
+    func,
+    select,
+    true,
+    update,
 )
 
 
@@ -278,6 +290,148 @@ def reject_user(
 
 
 
+@router.post(
+    "/users/{user_id}/enable",
+    response_model=AdminActionResponse,
+)
+def enable_user(
+    user_id: str,
+    db: Session = Depends(get_db),
+    admin: UserAccount = Depends(require_admin),
+):
+
+    result = db.execute(
+        update(UserAccount)
+        .where(
+            UserAccount.id == user_id,
+            UserAccount.role == "user",
+            UserAccount.approval_status == "approved",
+            UserAccount.is_active == false(),
+        )
+        .values(
+            is_active=True,
+        )
+        .execution_options(
+            synchronize_session=False
+        )
+    )
+
+    if result.rowcount != 1:
+
+        db.rollback()
+
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "User not found, not approved, "
+                "or already enabled."
+            ),
+        )
+
+    record_admin_action(
+        db=db,
+        actor_user_id=admin.id,
+        action="user.enabled",
+        target_user_id=user_id,
+        details={
+            "is_active": True,
+        },
+    )
+
+    db.commit()
+
+    return AdminActionResponse(
+        id=user_id,
+        approval_status="approved",
+        message="User enabled successfully.",
+    )
+
+
+@router.post(
+    "/users/{user_id}/disable",
+    response_model=AdminActionResponse,
+)
+def disable_user(
+    user_id: str,
+    db: Session = Depends(get_db),
+    admin: UserAccount = Depends(require_admin),
+):
+
+    if user_id == admin.id:
+
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "Administrators cannot disable "
+                "their own accounts."
+            ),
+        )
+
+    now = utc_now()
+
+    result = db.execute(
+        update(UserAccount)
+        .where(
+            UserAccount.id == user_id,
+            UserAccount.role == "user",
+            UserAccount.approval_status == "approved",
+            UserAccount.is_active == true(),
+        )
+        .values(
+            is_active=False,
+        )
+        .execution_options(
+            synchronize_session=False
+        )
+    )
+
+    if result.rowcount != 1:
+
+        db.rollback()
+
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "User not found, not approved, "
+                "or already disabled."
+            ),
+        )
+
+    db.execute(
+        update(UserSession)
+        .where(
+            UserSession.user_id == user_id,
+            UserSession.revoked_at.is_(None),
+        )
+        .values(
+            revoked_at=now,
+        )
+        .execution_options(
+            synchronize_session=False
+        )
+    )
+
+    record_admin_action(
+        db=db,
+        actor_user_id=admin.id,
+        action="user.disabled",
+        target_user_id=user_id,
+        details={
+            "is_active": False,
+            "sessions_revoked": True,
+        },
+    )
+
+    db.commit()
+
+    return AdminActionResponse(
+        id=user_id,
+        approval_status="approved",
+        message=(
+            "User disabled successfully. "
+            "Existing sessions have been revoked."
+        ),
+    )
 
 @router.get(
     "/research/jobs",
@@ -422,3 +576,162 @@ def get_admin_research_job_summary(
         total=total,
         statuses=statuses,
     )
+
+
+def validate_recovery_health_snapshot(
+    snapshot: object,
+) -> dict:
+
+    if not isinstance(snapshot, dict):
+
+        raise ValueError(
+            "Recovery health snapshot must be a JSON object."
+        )
+
+    required_fields = {
+        "state": str,
+        "pid": int,
+        "started_at": str,
+        "updated_at": str,
+        "cycles": int,
+        "resumed": int,
+        "paused": int,
+        "skipped": int,
+        "failed_sessions": int,
+        "cycle_errors": int,
+    }
+
+    for field_name, expected_type in required_fields.items():
+
+        value = snapshot.get(
+            field_name
+        )
+
+        if type(value) is not expected_type:
+
+            raise ValueError(
+                f"Invalid recovery health field: {field_name}"
+            )
+
+    allowed_states = {
+        "starting",
+        "running",
+        "recovering",
+        "stopping",
+        "stopped",
+    }
+
+    if snapshot["state"] not in allowed_states:
+
+        raise ValueError(
+            "Invalid recovery health state."
+        )
+
+    for field_name in (
+        "last_cycle_at",
+        "last_success_at",
+        "last_error",
+    ):
+
+        value = snapshot.get(
+            field_name
+        )
+
+        if (
+            value is not None
+            and not isinstance(value, str)
+        ):
+
+            raise ValueError(
+                f"Invalid recovery health field: {field_name}"
+            )
+
+    duration = snapshot.get(
+        "last_cycle_duration_seconds"
+    )
+
+    if (
+        duration is not None
+        and (
+            type(duration) not in (int, float)
+            or not math.isfinite(duration)
+            or duration < 0
+        )
+    ):
+
+        raise ValueError(
+            "Invalid recovery cycle duration."
+        )
+
+    return snapshot
+
+
+@router.get(
+    "/recovery/health",
+)
+def get_admin_recovery_health(
+    admin: UserAccount = Depends(require_admin),
+):
+
+    configured_path = os.environ.get(
+        "RESEARCH_RECOVERY_HEALTH_FILE"
+    )
+
+    if (
+        configured_path is None
+        or not configured_path.strip()
+    ):
+
+        return {
+            "available": False,
+            "health": None,
+        }
+
+    health_path = Path(
+        configured_path.strip()
+    )
+
+    try:
+
+        with health_path.open(
+            "r",
+            encoding="utf-8",
+        ) as health_file:
+
+            snapshot = json.load(
+                health_file
+            )
+
+    except FileNotFoundError:
+
+        return {
+            "available": False,
+            "health": None,
+        }
+
+    except (OSError, UnicodeError, ValueError):
+
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Recovery health snapshot is unavailable.",
+        )
+
+    try:
+
+        validated_snapshot = (
+            validate_recovery_health_snapshot(
+                snapshot
+            )
+        )
+
+    except ValueError:
+
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Recovery health snapshot is invalid.",
+        )
+
+    return {
+        "available": True,
+        "health": validated_snapshot,
+    }

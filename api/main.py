@@ -22,18 +22,16 @@ app = FastAPI(
     version="0.1.0",
 )
 
-app.include_router(auth_router)
-
-app.include_router(research_jobs_router)
-
-app.include_router(admin_router)
-
 app.include_router(
     auth_router
 )
 
 app.include_router(
     research_jobs_router
+)
+
+app.include_router(
+    admin_router
 )
 
 
