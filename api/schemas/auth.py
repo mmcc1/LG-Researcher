@@ -7,6 +7,42 @@ from pydantic import (
 )
 
 
+class RegisterRequest(BaseModel):
+
+    username: str = Field(
+        min_length=1,
+        max_length=100,
+    )
+
+    password: str = Field(
+        min_length=12,
+        max_length=1024,
+    )
+
+    confirm_password: str = Field(
+        min_length=12,
+        max_length=1024,
+    )
+
+
+class RegisterResponse(BaseModel):
+
+    message: str
+
+
+class PasswordResetRequestInput(BaseModel):
+
+    username: str = Field(
+        min_length=1,
+        max_length=100,
+    )
+
+
+class PasswordResetRequestResponse(BaseModel):
+
+    message: str
+
+    
 class LoginRequest(BaseModel):
 
     username: str = Field(

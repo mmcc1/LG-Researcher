@@ -2,7 +2,12 @@
 import {
     useCallback,
     useEffect,
+    useRef,
     useState,
+} from "react";
+
+import type {
+    FormEvent,
 } from "react";
 
 import type {
@@ -15,14 +20,20 @@ import {
     createResearchJob,
     getResearchJob,
     listResearchJobs,
+    pauseResearchJob,
     removeResearchQuestion,
+    resumeResearchJob,
     submitResearchJob,
     updateResearchJob,
 } from "./api/researchJobs";
 
 import "./App.css";
 
+
 const pageSize = 10;
+
+const refreshIntervalMilliseconds = 5000;
+
 
 function errorMessage(error: unknown): string {
 
@@ -32,6 +43,7 @@ function errorMessage(error: unknown): string {
 
     return "An unexpected error occurred.";
 }
+
 
 function formatDate(
     value: string | null,
@@ -49,6 +61,7 @@ function formatDate(
 
     return date.toLocaleString();
 }
+
 
 function App() {
 
@@ -86,6 +99,13 @@ function App() {
         null,
     );
 
+    const [pausePendingJobId, setPausePendingJobId] = useState<
+        string | null
+    >(null);
+
+    const refreshInProgressRef = useRef(false);
+
+
     const loadJobs = useCallback(
         async () => {
 
@@ -116,6 +136,7 @@ function App() {
         [offset],
     );
 
+
     useEffect(
         () => {
 
@@ -126,6 +147,109 @@ function App() {
         },
         [view, loadJobs],
     );
+
+
+    useEffect(() => {
+
+        if (
+            view !== "details" ||
+            selectedJob === null ||
+            saving
+        ) {
+            return;
+        }
+
+        const jobId = selectedJob.id;
+
+        const refreshableStatuses = new Set([
+            "queued",
+            "claimed",
+            "pause_requested",
+        ]);
+
+        if (
+            !refreshableStatuses.has(
+                selectedJob.status
+            )
+        ) {
+            return;
+        }
+
+        let cancelled = false;
+
+        const refreshJob = async () => {
+
+            if (
+                cancelled ||
+                document.visibilityState !== "visible" ||
+                refreshInProgressRef.current
+            ) {
+                return;
+            }
+
+            refreshInProgressRef.current = true;
+
+            try {
+
+                const job = await getResearchJob(
+                    jobId,
+                );
+
+                if (!cancelled) {
+
+                    setSelectedJob(job);
+
+                    if (job.status !== "claimed") {
+
+                        setPausePendingJobId(
+                            (current) => (
+                                current === jobId
+                                    ? null
+                                    : current
+                            ),
+                        );
+                    }
+                }
+
+            } catch (error) {
+
+                if (!cancelled) {
+
+                    console.error(
+                        "Unable to refresh research job.",
+                        error,
+                    );
+                }
+
+            } finally {
+
+                refreshInProgressRef.current = false;
+            }
+        };
+
+        const intervalId = window.setInterval(
+            () => {
+                void refreshJob();
+            },
+            refreshIntervalMilliseconds,
+        );
+
+        return () => {
+
+            cancelled = true;
+
+            window.clearInterval(
+                intervalId,
+            );
+        };
+
+    }, [
+        view,
+        selectedJob?.id,
+        selectedJob?.status,
+        saving,
+    ]);
+
 
     async function openJob(
         jobId: string,
@@ -145,6 +269,7 @@ function App() {
             setTopic(job.topic);
             setScope(job.scope ?? "");
             setNewQuestion("");
+            setPausePendingJobId(null);
             setView("details");
 
         } catch (error) {
@@ -159,24 +284,29 @@ function App() {
         }
     }
 
+
     function openNewJob() {
 
         setSelectedJob(null);
         setTopic("");
         setScope("");
         setNewQuestion("");
+        setPausePendingJobId(null);
         setError(null);
         setNotice(null);
         setView("new");
     }
 
+
     function returnToDashboard() {
 
         setSelectedJob(null);
+        setPausePendingJobId(null);
         setError(null);
         setNotice(null);
         setView("dashboard");
     }
+
 
     async function refreshSelectedJob(
         jobId: string,
@@ -188,11 +318,23 @@ function App() {
 
         setSelectedJob(job);
 
+        if (job.status !== "claimed") {
+
+            setPausePendingJobId(
+                (current) => (
+                    current === jobId
+                        ? null
+                        : current
+                ),
+            );
+        }
+
         return job;
     }
 
+
     async function createJob(
-        event: React.FormEvent<HTMLFormElement>,
+        event: FormEvent<HTMLFormElement>,
     ) {
 
         event.preventDefault();
@@ -234,8 +376,9 @@ function App() {
         }
     }
 
+
     async function saveJob(
-        event: React.FormEvent<HTMLFormElement>,
+        event: FormEvent<HTMLFormElement>,
     ) {
 
         event.preventDefault();
@@ -283,8 +426,9 @@ function App() {
         }
     }
 
+
     async function addQuestion(
-        event: React.FormEvent<HTMLFormElement>,
+        event: FormEvent<HTMLFormElement>,
     ) {
 
         event.preventDefault();
@@ -326,6 +470,7 @@ function App() {
         }
     }
 
+
     async function removeQuestion(
         questionId: number,
     ) {
@@ -364,6 +509,7 @@ function App() {
             setSaving(false);
         }
     }
+
 
     async function submitJob() {
 
@@ -413,8 +559,143 @@ function App() {
         }
     }
 
+
+    async function pauseJob() {
+
+        if (!selectedJob || saving) {
+            return;
+        }
+
+        const jobId = selectedJob.id;
+
+        if (
+            !window.confirm(
+                "Pause this research job? " +
+                "Running research will pause at the next " +
+                "available checkpoint.",
+            )
+        ) {
+            return;
+        }
+
+        setSaving(true);
+        setError(null);
+        setNotice(null);
+
+        try {
+
+            const result = await pauseResearchJob(
+                jobId,
+            );
+
+            if (result.status === "pause_requested") {
+
+                setPausePendingJobId(jobId);
+
+            } else {
+
+                setPausePendingJobId(null);
+            }
+
+            const job = await refreshSelectedJob(
+                jobId,
+            );
+
+            if (job.status === "paused") {
+
+                setPausePendingJobId(null);
+
+                setNotice(
+                    "Research job paused.",
+                );
+
+            } else if (
+                result.status === "pause_requested"
+            ) {
+
+                setNotice(
+                    "Pause requested. Research will pause " +
+                    "at the next available checkpoint.",
+                );
+
+            } else {
+
+                setNotice(
+                    `Pause request result: ${result.status}`,
+                );
+            }
+
+        } catch (error) {
+
+            setError(
+                errorMessage(error),
+            );
+
+        } finally {
+
+            setSaving(false);
+        }
+    }
+
+
+    async function resumeJob() {
+
+        if (!selectedJob || saving) {
+            return;
+        }
+
+        const jobId = selectedJob.id;
+
+        setSaving(true);
+        setError(null);
+        setNotice(null);
+
+        try {
+
+            await resumeResearchJob(
+                jobId,
+            );
+
+            setPausePendingJobId(null);
+
+            await refreshSelectedJob(
+                jobId,
+            );
+
+            setNotice(
+                "Research job resumed and returned to the queue.",
+            );
+
+        } catch (error) {
+
+            setError(
+                errorMessage(error),
+            );
+
+        } finally {
+
+            setSaving(false);
+        }
+    }
+
+
     const isDraft = (
         selectedJob?.status === "draft"
+    );
+
+    const canPause = (
+        selectedJob?.status === "queued" ||
+        selectedJob?.status === "claimed"
+    );
+
+    const canResume = (
+        selectedJob?.status === "paused"
+    );
+
+    const pausePending = (
+        selectedJob !== null &&
+        pausePendingJobId === selectedJob.id &&
+        selectedJob.status === "claimed"
     );
 
     const pageNumber = (
@@ -425,6 +706,7 @@ function App() {
         1,
         Math.ceil(total / pageSize),
     );
+
 
     return (
         <div className="app-shell">
@@ -440,6 +722,7 @@ function App() {
                 </div>
 
                 <button
+                    type="button"
                     className="button secondary"
                     onClick={returnToDashboard}
                     disabled={saving}
@@ -485,6 +768,7 @@ function App() {
                             </div>
 
                             <button
+                                type="button"
                                 className="button primary"
                                 onClick={openNewJob}
                             >
@@ -500,6 +784,7 @@ function App() {
                         ) : (
 
                             <>
+
                                 <div className="table-wrapper">
 
                                     <table>
@@ -548,6 +833,7 @@ function App() {
 
                                                     <td>
                                                         <button
+                                                            type="button"
                                                             className="button small"
                                                             onClick={() => {
                                                                 void openJob(
@@ -593,6 +879,7 @@ function App() {
                                     <div className="button-group">
 
                                         <button
+                                            type="button"
                                             className="button secondary"
                                             disabled={offset === 0}
                                             onClick={() => {
@@ -608,6 +895,7 @@ function App() {
                                         </button>
 
                                         <button
+                                            type="button"
                                             className="button secondary"
                                             disabled={
                                                 offset + pageSize >= total
@@ -624,6 +912,7 @@ function App() {
                                     </div>
 
                                 </div>
+
                             </>
 
                         )}
@@ -722,6 +1011,7 @@ function App() {
                                 </div>
 
                                 <button
+                                    type="button"
                                     className="button secondary"
                                     onClick={() => {
                                         void openJob(
@@ -817,6 +1107,67 @@ function App() {
 
                             </div>
 
+                            {pausePending && (
+
+                                <p
+                                    className="muted"
+                                    role="status"
+                                >
+                                    Pause requested. Waiting for the
+                                    research workflow to reach a safe
+                                    checkpoint.
+                                </p>
+
+                            )}
+
+                            {canPause && (
+
+                                <div className="button-group">
+
+                                    <button
+                                        type="button"
+                                        className="button secondary"
+                                        disabled={
+                                            saving ||
+                                            loading ||
+                                            pausePending
+                                        }
+                                        onClick={() => {
+                                            void pauseJob();
+                                        }}
+                                    >
+                                        {pausePending
+                                            ? "Pause requested"
+                                            : saving
+                                                ? "Processing..."
+                                                : "Pause research"}
+                                    </button>
+
+                                </div>
+
+                            )}
+
+                            {canResume && (
+
+                                <div className="button-group">
+
+                                    <button
+                                        type="button"
+                                        className="button primary"
+                                        disabled={saving || loading}
+                                        onClick={() => {
+                                            void resumeJob();
+                                        }}
+                                    >
+                                        {saving
+                                            ? "Processing..."
+                                            : "Resume research"}
+                                    </button>
+
+                                </div>
+
+                            )}
+
                         </section>
 
                         <section className="panel">
@@ -848,6 +1199,7 @@ function App() {
                                             {isDraft && (
 
                                                 <button
+                                                    type="button"
                                                     className="button danger small"
                                                     disabled={saving}
                                                     onClick={() => {
@@ -920,6 +1272,7 @@ function App() {
                                 </div>
 
                                 <button
+                                    type="button"
                                     className="button primary"
                                     disabled={saving}
                                     onClick={() => {
@@ -942,5 +1295,6 @@ function App() {
         </div>
     );
 }
+
 
 export default App;

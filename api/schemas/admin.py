@@ -33,6 +33,40 @@ class AdminActionResponse(BaseModel):
     message: str
 
 
+class AdminPasswordResetRequestResponse(BaseModel):
+
+    id: str
+    user_id: str
+    username: str
+    status: str
+    requested_at: datetime
+    reviewed_at: datetime | None
+    reviewed_by: str | None
+
+
+class AdminPasswordResetRequestListResponse(BaseModel):
+
+    items: list[AdminPasswordResetRequestResponse]
+    total: int
+    limit: int
+    offset: int
+
+
+class AdminPasswordResetActionResponse(BaseModel):
+
+    id: str
+    status: str
+    message: str
+
+
+class AdminPasswordResetApprovalResponse(BaseModel):
+
+    id: str
+    status: str
+    message: str
+    temporary_password: str
+    
+
 class AdminResearchJobResponse(BaseModel):
 
     id: str

@@ -9,11 +9,8 @@ from sqlalchemy import (
 )
 
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 
-from persistence.models import (
-    UserAccount,
-    UserSession,
-)
 
 from security.password_hasher import (
     hash_password,
@@ -23,6 +20,16 @@ from security.password_hasher import (
 from security.session_tokens import (
     generate_token,
     hash_token,
+)
+
+import secrets
+
+from sqlalchemy.exc import IntegrityError
+
+from persistence.models import (
+    PasswordResetRequest,
+    UserAccount,
+    UserSession,
 )
 
 
@@ -49,6 +56,12 @@ class CreatedSession:
 class AuthenticationError(Exception):
     pass
 
+class RegistrationError(Exception):
+    pass
+
+class PasswordResetError(Exception):
+    pass
+
 
 class AuthenticationService:
 
@@ -58,6 +71,277 @@ class AuthenticationService:
     ):
 
         self.db = db
+
+    def register_user(
+        self,
+        username: str,
+        password: str,
+    ) -> UserAccount:
+
+        normalized_username = username.strip()
+
+        if not normalized_username:
+
+            raise RegistrationError(
+                "Username is required."
+            )
+
+        if len(normalized_username) > 100:
+
+            raise RegistrationError(
+                "Username must not exceed 100 characters."
+            )
+
+        if len(password) < 12:
+
+            raise RegistrationError(
+                "Password must contain at least 12 characters."
+            )
+
+        if len(password) > 1024:
+
+            raise RegistrationError(
+                "Password must not exceed 1024 characters."
+            )
+
+        existing_user = self.db.scalar(
+            select(UserAccount).where(
+                UserAccount.username == normalized_username
+            )
+        )
+
+        if existing_user is not None:
+
+            raise RegistrationError(
+                "Username is already registered."
+            )
+
+        now = utc_now()
+
+        user = UserAccount(
+            id=str(uuid4()),
+            username=normalized_username,
+            email=None,
+            password_hash=hash_password(
+                password
+            ),
+            is_active=False,
+            role="user",
+            approval_status="pending",
+            must_change_password=False,
+            approved_at=None,
+            email_reports_enabled=False,
+            created_at=now,
+            last_login_at=None,
+        )
+
+        try:
+
+            self.db.add(user)
+
+            self.db.commit()
+
+        except IntegrityError:
+
+            self.db.rollback()
+
+            raise RegistrationError(
+                "Username is already registered."
+            )
+
+        return user
+
+
+    def request_password_reset(
+        self,
+        username: str,
+    ) -> None:
+
+        normalized_username = username.strip()
+
+        if not normalized_username:
+            return
+
+        user = self.db.scalar(
+            select(UserAccount).where(
+                UserAccount.username
+                == normalized_username
+            )
+        )
+
+        if user is None:
+            return
+
+        if (
+            not user.is_active
+            or user.approval_status != "approved"
+        ):
+            return
+
+        existing_request = self.db.scalar(
+            select(PasswordResetRequest).where(
+                PasswordResetRequest.user_id == user.id,
+                PasswordResetRequest.status == "pending",
+            )
+        )
+
+        if existing_request is not None:
+            return
+
+        reset_request = PasswordResetRequest(
+            id=str(uuid4()),
+            user_id=user.id,
+            status="pending",
+            requested_at=utc_now(),
+            reviewed_at=None,
+            reviewed_by=None,
+            recovery_code_hash=None,
+            recovery_code_expires_at=None,
+            completed_at=None,
+            failed_attempts=0,
+        )
+
+        try:
+
+            self.db.add(reset_request)
+
+            self.db.commit()
+
+        except IntegrityError:
+
+            self.db.rollback()
+
+            # A concurrent request may already have
+            # created the pending record.
+            return
+
+
+    def approve_password_reset(
+        self,
+        reset_request: PasswordResetRequest,
+        admin: UserAccount,
+    ) -> str:
+
+        if reset_request.status != "pending":
+
+            raise PasswordResetError(
+                "Password reset request is no longer pending."
+            )
+
+        user = self.db.get(
+            UserAccount,
+            reset_request.user_id,
+        )
+
+        if user is None:
+
+            raise PasswordResetError(
+                "User account was not found."
+            )
+
+        if (
+            not user.is_active
+            or user.approval_status != "approved"
+        ):
+
+            raise PasswordResetError(
+                "User account is not available."
+            )
+
+        now = utc_now()
+
+        temporary_password = secrets.token_urlsafe(
+            24
+        )
+
+        result = self.db.execute(
+            update(PasswordResetRequest)
+            .where(
+                PasswordResetRequest.id == reset_request.id,
+                PasswordResetRequest.status == "pending",
+            )
+            .values(
+                status="completed",
+                reviewed_at=now,
+                reviewed_by=admin.id,
+                completed_at=now,
+            )
+            .execution_options(
+                synchronize_session=False
+            )
+        )
+
+        if result.rowcount != 1:
+
+            self.db.rollback()
+
+            raise PasswordResetError(
+                "Password reset request is no longer pending."
+            )
+
+        user.password_hash = hash_password(
+            temporary_password
+        )
+
+        user.must_change_password = True
+
+        self.db.execute(
+            update(UserSession)
+            .where(
+                UserSession.user_id == user.id,
+                UserSession.revoked_at.is_(None),
+            )
+            .values(
+                revoked_at=now
+            )
+        )
+
+        # The caller must record the administrator
+        # audit event and commit this transaction.
+        return temporary_password 
+
+
+    def reject_password_reset(
+        self,
+        reset_request: PasswordResetRequest,
+        admin: UserAccount,
+    ) -> None:
+
+        if reset_request.status != "pending":
+
+            raise PasswordResetError(
+                "Password reset request is no longer pending."
+            )
+
+        now = utc_now()
+
+        result = self.db.execute(
+            update(PasswordResetRequest)
+            .where(
+                PasswordResetRequest.id == reset_request.id,
+                PasswordResetRequest.status == "pending",
+            )
+            .values(
+                status="rejected",
+                reviewed_at=now,
+                reviewed_by=admin.id,
+            )
+            .execution_options(
+                synchronize_session=False
+            )
+        )
+
+        if result.rowcount != 1:
+
+            self.db.rollback()
+
+            raise PasswordResetError(
+                "Password reset request is no longer pending."
+            )
+
+        # The administrator endpoint records the
+        # audit event and commits the transaction.
+
 
     def authenticate(
         self,

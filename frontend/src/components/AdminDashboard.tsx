@@ -25,11 +25,15 @@ import {
     RecoveryWorkerDashboard,
 } from "./RecoveryWorkerDashboard";
 
+import {
+    PasswordResetDashboard,
+} from "./PasswordResetDashboard";
+
 
 export function AdminDashboard() {
 
     const [adminView, setAdminView] = useState<
-        "users" | "research" | "recovery"
+        "users" | "password-resets" | "research" | "recovery"
     >("users");
 
     const [users, setUsers] = useState<
@@ -220,6 +224,17 @@ export function AdminDashboard() {
                     <button
                         type="button"
                         className="button secondary"
+                        aria-pressed={adminView === "password-resets"}
+                        onClick={() => {
+                            setAdminView("password-resets");
+                        }}
+                    >
+                        Password Resets
+                    </button>
+
+                    <button
+                        type="button"
+                        className="button secondary"
                         aria-pressed={adminView === "research"}
                         onClick={() => {
                             setAdminView("research");
@@ -248,6 +263,10 @@ export function AdminDashboard() {
                 ) : adminView === "recovery" ? (
 
                     <RecoveryWorkerDashboard />
+
+                ) : adminView === "password-resets" ? (
+
+                    <PasswordResetDashboard />
 
                 ) : (
 

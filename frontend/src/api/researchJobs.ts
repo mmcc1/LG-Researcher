@@ -143,3 +143,29 @@ export async function submitResearchJob(
         },
     );
 }
+
+
+export async function pauseResearchJob(
+    jobId: string,
+): Promise<ResearchJobAction> {
+
+    return await request<ResearchJobAction>(
+        `${basePath}/${encodeURIComponent(jobId)}/pause`,
+        {
+            method: "POST",
+        },
+    );
+}
+
+
+export async function resumeResearchJob(
+    jobId: string,
+): Promise<ResearchJobAction> {
+
+    return await request<ResearchJobAction>(
+        `${basePath}/${encodeURIComponent(jobId)}/resume`,
+        {
+            method: "POST",
+        },
+    );
+}

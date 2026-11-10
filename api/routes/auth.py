@@ -26,11 +26,16 @@ from api.schemas.auth import (
     LoginRequest,
     LoginResponse,
     MessageResponse,
+    RegisterRequest,
+    RegisterResponse,
+    PasswordResetRequestInput,
+    PasswordResetRequestResponse,
 )
 
 from application.authentication_service import (
     AuthenticationError,
     AuthenticationService,
+    RegistrationError,
 )
 
 from persistence.models import (
@@ -100,6 +105,99 @@ def clear_session_cookie(
         ),
         httponly=True,
         samesite="strict",
+    )
+
+
+@router.post(
+    "/register",
+    response_model=RegisterResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def register(
+    request: Request,
+    registration: RegisterRequest,
+    response: Response,
+    db: Session = Depends(get_db),
+):
+
+    validate_request_origin(
+        request
+    )
+
+    if (
+        registration.password
+        != registration.confirm_password
+    ):
+
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Passwords do not match.",
+        )
+
+    service = AuthenticationService(
+        db
+    )
+
+    try:
+
+        service.register_user(
+            username=registration.username,
+            password=registration.password,
+        )
+
+    except RegistrationError as exc:
+
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+
+    response.headers["Cache-Control"] = (
+        "no-store"
+    )
+
+    return RegisterResponse(
+        message=(
+            "Registration submitted successfully. "
+            "Your account must be approved by "
+            "an administrator before you can log in."
+        )
+    )
+
+
+@router.post(
+    "/password-reset-requests",
+    response_model=PasswordResetRequestResponse,
+)
+def request_password_reset(
+    request: Request,
+    reset_input: PasswordResetRequestInput,
+    response: Response,
+    db: Session = Depends(get_db),
+):
+
+    validate_request_origin(
+        request
+    )
+
+    service = AuthenticationService(
+        db
+    )
+
+    service.request_password_reset(
+        username=reset_input.username,
+    )
+
+    response.headers["Cache-Control"] = (
+        "no-store"
+    )
+
+    return PasswordResetRequestResponse(
+        message=(
+            "If the account is eligible, "
+            "a password reset request has been submitted "
+            "for administrator review."
+        )
     )
 
 

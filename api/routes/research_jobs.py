@@ -370,6 +370,101 @@ def submit_research_job(
     )
 
 
+@router.post(
+    "/{job_id}/pause",
+    response_model=ResearchJobActionResponse,
+)
+def pause_research_job(
+    job_id: str,
+    db: Session = Depends(get_db),
+    user_id: str = Depends(get_current_user_id),
+):
+
+    get_owned_job(
+        db=db,
+        job_id=job_id,
+        user_id=user_id,
+    )
+
+    repository = ResearchJobRepository(
+        db
+    )
+
+    try:
+
+        result = repository.request_pause(
+            job_id=job_id,
+            user_id=user_id,
+        )
+
+    except RuntimeError as exc:
+
+        if str(exc) != (
+            "Research job is being initialised. "
+            "Retry the pause request shortly."
+        ):
+            raise
+
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
+
+    if result is None:
+
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "The research job cannot be paused "
+                "from its current state."
+            ),
+        )
+
+    return ResearchJobActionResponse(
+        id=job_id,
+        status=result,
+    )
+
+
+@router.post(
+    "/{job_id}/resume",
+    response_model=ResearchJobActionResponse,
+)
+def resume_research_job(
+    job_id: str,
+    db: Session = Depends(get_db),
+    user_id: str = Depends(get_current_user_id),
+):
+
+    get_owned_job(
+        db=db,
+        job_id=job_id,
+        user_id=user_id,
+    )
+
+    repository = ResearchJobRepository(
+        db
+    )
+
+    resumed = repository.resume_paused(
+        job_id=job_id,
+        user_id=user_id,
+    )
+
+    if not resumed:
+
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "The research job cannot be resumed "
+                "from its current state."
+            ),
+        )
+
+    return ResearchJobActionResponse(
+        id=job_id,
+        status="queued",
+    )
 
 @router.get(
     "",

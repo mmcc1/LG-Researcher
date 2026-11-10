@@ -23,6 +23,56 @@ export interface AuthSession {
 }
 
 
+export interface RegistrationInput {
+
+    username: string;
+    password: string;
+    confirm_password: string;
+}
+
+
+export interface RegistrationResponse {
+
+    message: string;
+}
+
+
+export async function register(
+    input: RegistrationInput,
+): Promise<RegistrationResponse> {
+
+    return await request<RegistrationResponse>(
+        "/api/auth/register",
+        {
+            method: "POST",
+            body: JSON.stringify(input),
+        },
+    );
+}
+
+
+export interface PasswordResetRequestResponse {
+
+    message: string;
+}
+
+
+export async function requestPasswordReset(
+    username: string,
+): Promise<PasswordResetRequestResponse> {
+
+    return await request<PasswordResetRequestResponse>(
+        "/api/auth/password-reset-requests",
+        {
+            method: "POST",
+            body: JSON.stringify({
+                username,
+            }),
+        },
+    );
+}
+
+
 export async function login(
     username: string,
     password: string,

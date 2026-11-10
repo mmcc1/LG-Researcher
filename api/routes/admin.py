@@ -11,6 +11,7 @@ from fastapi import (
     Depends,
     HTTPException,
     Query,
+    Response,
     status,
 )
 
@@ -27,13 +28,12 @@ from api.dependencies import (
     require_admin,
 )
 
-from application.authentication_service import utc_now
-
 from persistence.models import (
     AdminAuditLog,
     ResearchJob,
     UserAccount,
     UserSession,
+    PasswordResetRequest,
 )
 
 from api.schemas.admin import (
@@ -44,6 +44,10 @@ from api.schemas.admin import (
     AdminResearchJobSummaryResponse,
     AdminUserListResponse,
     AdminUserResponse,
+    AdminPasswordResetActionResponse,
+    AdminPasswordResetApprovalResponse,
+    AdminPasswordResetRequestListResponse,
+    AdminPasswordResetRequestResponse,
 )
 
 from sqlalchemy import (
@@ -54,6 +58,11 @@ from sqlalchemy import (
     update,
 )
 
+from application.authentication_service import (
+    AuthenticationService,
+    PasswordResetError,
+    utc_now,
+)
 
 router = APIRouter(
     prefix="/api/admin",
@@ -78,6 +87,21 @@ def build_user_response(
         last_login_at=user.last_login_at,
     )
 
+
+def build_password_reset_response(
+    reset_request: PasswordResetRequest,
+    username: str,
+) -> AdminPasswordResetRequestResponse:
+
+    return AdminPasswordResetRequestResponse(
+        id=reset_request.id,
+        user_id=reset_request.user_id,
+        username=username,
+        status=reset_request.status,
+        requested_at=reset_request.requested_at,
+        reviewed_at=reset_request.reviewed_at,
+        reviewed_by=reset_request.reviewed_by,
+    )
 
 def record_admin_action(
     db: Session,
@@ -432,6 +456,251 @@ def disable_user(
             "Existing sessions have been revoked."
         ),
     )
+
+
+@router.get(
+    "/password-reset-requests",
+    response_model=AdminPasswordResetRequestListResponse,
+)
+def list_password_reset_requests(
+    reset_status: str | None = Query(
+        default=None,
+        alias="status",
+        pattern="^(pending|completed|rejected)$",
+    ),
+    limit: int = Query(
+        default=50,
+        ge=1,
+        le=100,
+    ),
+    offset: int = Query(
+        default=0,
+        ge=0,
+    ),
+    db: Session = Depends(get_db),
+    admin: UserAccount = Depends(require_admin),
+):
+
+    filters = []
+
+    if reset_status is not None:
+
+        filters.append(
+            PasswordResetRequest.status == reset_status
+        )
+
+    count_statement = (
+        select(func.count())
+        .select_from(PasswordResetRequest)
+        .where(*filters)
+    )
+
+    total = db.execute(
+        count_statement
+    ).scalar_one()
+
+    statement = (
+        select(
+            PasswordResetRequest,
+            UserAccount.username,
+        )
+        .join(
+            UserAccount,
+            PasswordResetRequest.user_id == UserAccount.id,
+        )
+        .where(*filters)
+        .order_by(
+            PasswordResetRequest.requested_at.desc(),
+            PasswordResetRequest.id.desc(),
+        )
+        .offset(offset)
+        .limit(limit)
+    )
+
+    results = db.execute(
+        statement
+    ).all()
+
+    items = []
+
+    for reset_request, username in results:
+
+        item = build_password_reset_response(
+            reset_request=reset_request,
+            username=username,
+        )
+
+        items.append(item)
+
+    return AdminPasswordResetRequestListResponse(
+        items=items,
+        total=total,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.post(
+    "/password-reset-requests/{request_id}/approve",
+    response_model=AdminPasswordResetApprovalResponse,
+)
+def approve_password_reset_request(
+    request_id: str,
+    response: Response,
+    db: Session = Depends(get_db),
+    admin: UserAccount = Depends(require_admin),
+):
+
+    reset_request = db.get(
+        PasswordResetRequest,
+        request_id,
+    )
+
+    if reset_request is None:
+
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Password reset request not found.",
+        )
+
+    if reset_request.user_id == admin.id:
+
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "Administrators cannot approve "
+                "their own password resets."
+            ),
+        )
+
+    service = AuthenticationService(
+        db
+    )
+
+    try:
+
+        temporary_password = (
+            service.approve_password_reset(
+                reset_request=reset_request,
+                admin=admin,
+            )
+        )
+
+        record_admin_action(
+            db=db,
+            actor_user_id=admin.id,
+            action="password_reset.approved",
+            target_user_id=reset_request.user_id,
+            details={
+                "request_id": reset_request.id,
+                "sessions_revoked": True,
+                "must_change_password": True,
+            },
+        )
+
+        db.commit()
+
+    except PasswordResetError as exc:
+
+        db.rollback()
+
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
+
+    except Exception:
+
+        db.rollback()
+
+        raise
+
+    response.headers["Cache-Control"] = (
+        "no-store"
+    )
+
+    response.headers["Pragma"] = (
+        "no-cache"
+    )
+
+    return AdminPasswordResetApprovalResponse(
+        id=request_id,
+        status="completed",
+        message=(
+            "Password reset approved. "
+            "Provide the temporary password "
+            "to the verified account owner."
+        ),
+        temporary_password=temporary_password,
+    )
+
+
+@router.post(
+    "/password-reset-requests/{request_id}/reject",
+    response_model=AdminPasswordResetActionResponse,
+)
+def reject_password_reset_request(
+    request_id: str,
+    db: Session = Depends(get_db),
+    admin: UserAccount = Depends(require_admin),
+):
+
+    reset_request = db.get(
+        PasswordResetRequest,
+        request_id,
+    )
+
+    if reset_request is None:
+
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Password reset request not found.",
+        )
+
+    service = AuthenticationService(
+        db
+    )
+
+    try:
+
+        service.reject_password_reset(
+            reset_request=reset_request,
+            admin=admin,
+        )
+
+        record_admin_action(
+            db=db,
+            actor_user_id=admin.id,
+            action="password_reset.rejected",
+            target_user_id=reset_request.user_id,
+            details={
+                "request_id": reset_request.id,
+            },
+        )
+
+        db.commit()
+
+    except PasswordResetError as exc:
+
+        db.rollback()
+
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
+
+    except Exception:
+
+        db.rollback()
+
+        raise
+
+    return AdminPasswordResetActionResponse(
+        id=request_id,
+        status="rejected",
+        message="Password reset request rejected.",
+    )
+
 
 @router.get(
     "/research/jobs",

@@ -7,6 +7,7 @@ Frontend (a web UI for admins and users)
 
 This app uses a MSSQL backend over TCP/IP and requires an SQL account.
 Create a DB, call it 'Researcher' and allow the user account access.
+Add the details to .env and run create_database.py.
 
 
 Installation Intructions (recovery_worker.py)

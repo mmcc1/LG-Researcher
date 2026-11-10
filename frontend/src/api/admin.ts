@@ -233,3 +233,89 @@ export async function getAdminRecoveryHealth(
         },
     );
 }
+
+export interface AdminPasswordResetRequest {
+
+    id: string;
+    user_id: string;
+    username: string;
+    status: string;
+    requested_at: string;
+    reviewed_at: string | null;
+    reviewed_by: string | null;
+}
+
+
+export interface AdminPasswordResetRequestList {
+
+    items: AdminPasswordResetRequest[];
+    total: number;
+    limit: number;
+    offset: number;
+}
+
+
+export interface AdminPasswordResetAction {
+
+    id: string;
+    status: string;
+    message: string;
+}
+
+
+export interface AdminPasswordResetApproval
+    extends AdminPasswordResetAction {
+
+    temporary_password: string;
+}
+
+
+export async function listPasswordResetRequests(
+    status: string | null = "pending",
+    limit: number = 50,
+    offset: number = 0,
+): Promise<AdminPasswordResetRequestList> {
+
+    const parameters = new URLSearchParams({
+        limit: String(limit),
+        offset: String(offset),
+    });
+
+    if (status !== null) {
+
+        parameters.set(
+            "status",
+            status,
+        );
+    }
+
+    return await request<AdminPasswordResetRequestList>(
+        `/api/admin/password-reset-requests?${parameters.toString()}`,
+    );
+}
+
+
+export async function approvePasswordReset(
+    requestId: string,
+): Promise<AdminPasswordResetApproval> {
+
+    return await request<AdminPasswordResetApproval>(
+        `/api/admin/password-reset-requests/${encodeURIComponent(requestId)}/approve`,
+        {
+            method: "POST",
+        },
+    );
+}
+
+
+export async function rejectPasswordReset(
+    requestId: string,
+): Promise<AdminPasswordResetAction> {
+
+    return await request<AdminPasswordResetAction>(
+        `/api/admin/password-reset-requests/${encodeURIComponent(requestId)}/reject`,
+        {
+            method: "POST",
+        },
+    );
+}

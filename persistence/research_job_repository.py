@@ -566,8 +566,14 @@ class ResearchJobRepository:
                         SELECT 1
                         FROM dbo.research_sessions AS s
                         WHERE s.id = research_session_id
-                        AND s.execution_owner IS NOT NULL
-                        AND s.execution_lease_expires_at > SYSUTCDATETIME()
+                        AND (
+                            s.status = 'completed'
+                            OR s.pause_requested = 1
+                            OR (
+                                s.execution_owner IS NOT NULL
+                                AND s.execution_lease_expires_at > SYSUTCDATETIME()
+                            )
+                        )
                     )
                 )
                 ORDER BY submitted_at, id
@@ -841,6 +847,300 @@ class ResearchJobRepository:
 
             raise
 
+    
+    def resume_paused(
+        self,
+        job_id: str,
+        user_id: str,
+    ) -> bool:
+
+        try:
+
+            statement = text("""
+                SELECT
+                    research_session_id
+                FROM dbo.research_jobs WITH (
+                    UPDLOCK,
+                    HOLDLOCK
+                )
+                WHERE id = :job_id
+                  AND user_id = :user_id
+                  AND status = 'paused'
+                  AND execution_owner IS NULL
+                  AND lease_expires_at IS NULL
+            """)
+
+            row = self.db.execute(
+                statement,
+                {
+                    "job_id": job_id,
+                    "user_id": user_id,
+                },
+            ).first()
+
+            if row is None:
+
+                self.db.rollback()
+                return False
+
+            session_id = row[0]
+
+            if session_id is not None:
+
+                statement = text("""
+                    UPDATE dbo.research_sessions
+                    SET pause_requested = 0,
+                        updated_at = SYSUTCDATETIME()
+                    OUTPUT INSERTED.id
+                    WHERE id = :session_id
+                      AND status <> 'completed'
+                      AND (
+                          execution_owner IS NULL
+                          OR execution_lease_expires_at IS NULL
+                          OR execution_lease_expires_at
+                              <= SYSUTCDATETIME()
+                      )
+                """)
+
+                updated = self.db.execute(
+                    statement,
+                    {
+                        "session_id": session_id,
+                    },
+                ).first()
+
+                if updated is None:
+
+                    self.db.rollback()
+                    return False
+
+            statement = text("""
+                UPDATE dbo.research_jobs
+                SET status = 'queued',
+                    submitted_at = SYSUTCDATETIME(),
+                    completed_at = NULL,
+                    last_error = NULL,
+                    lease_version = lease_version + 1
+                OUTPUT INSERTED.id
+                WHERE id = :job_id
+                  AND user_id = :user_id
+                  AND status = 'paused'
+                  AND execution_owner IS NULL
+                  AND lease_expires_at IS NULL
+            """)
+
+            updated = self.db.execute(
+                statement,
+                {
+                    "job_id": job_id,
+                    "user_id": user_id,
+                },
+            ).first()
+
+            if updated is None:
+
+                raise RuntimeError(
+                    "Could not return paused research job "
+                    "to the queue."
+                )
+
+            self.db.commit()
+
+            return True
+
+        except Exception:
+
+            self.db.rollback()
+            raise
+
+
+    def request_pause(
+        self,
+        job_id: str,
+        user_id: str,
+    ) -> str | None:
+
+        try:
+
+            statement = text("""
+                SELECT
+                    status,
+                    research_session_id
+                FROM dbo.research_jobs WITH (
+                    UPDLOCK,
+                    HOLDLOCK
+                )
+                WHERE id = :job_id
+                  AND user_id = :user_id
+            """)
+
+            row = self.db.execute(
+                statement,
+                {
+                    "job_id": job_id,
+                    "user_id": user_id,
+                },
+            ).first()
+
+            if row is None:
+
+                self.db.rollback()
+                return None
+
+            status = row[0]
+            session_id = row[1]
+
+            if status == "paused":
+
+                self.db.commit()
+                return "paused"
+
+            if status == "queued":
+
+                if session_id is not None:
+
+                    statement = text("""
+                        UPDATE dbo.research_sessions
+                        SET pause_requested = 1,
+                            updated_at = SYSUTCDATETIME()
+                        OUTPUT INSERTED.id
+                        WHERE id = :session_id
+                          AND status <> 'completed'
+                    """)
+
+                    updated = self.db.execute(
+                        statement,
+                        {
+                            "session_id": session_id,
+                        },
+                    ).first()
+
+                    if updated is None:
+
+                        self.db.rollback()
+                        return None
+
+                statement = text("""
+                    UPDATE dbo.research_jobs
+                    SET status = 'paused',
+                        lease_version = lease_version + 1
+                    WHERE id = :job_id
+                      AND status = 'queued'
+                      AND execution_owner IS NULL
+                      AND lease_expires_at IS NULL
+                """)
+
+                result = self.db.execute(
+                    statement,
+                    {
+                        "job_id": job_id,
+                    },
+                )
+
+                if result.rowcount != 1:
+
+                    raise RuntimeError(
+                        "Could not pause the queued research job."
+                    )
+
+                self.db.commit()
+                return "paused"
+
+            if status != "claimed":
+
+                self.db.rollback()
+                return None
+
+            if session_id is None:
+
+                self.db.rollback()
+
+                raise RuntimeError(
+                    "Research job is being initialised. "
+                    "Retry the pause request shortly."
+                )
+
+            statement = text("""
+                UPDATE dbo.research_sessions
+                SET pause_requested = 1,
+                    updated_at = SYSUTCDATETIME()
+                OUTPUT INSERTED.id
+                WHERE id = :session_id
+                  AND status <> 'completed'
+            """)
+
+            updated = self.db.execute(
+                statement,
+                {
+                    "session_id": session_id,
+                },
+            ).first()
+
+            if updated is None:
+
+                self.db.rollback()
+                return None
+
+            self.db.commit()
+
+            return "pause_requested"
+
+        except Exception:
+
+            self.db.rollback()
+            raise
+
+
+    def pause_claimed(
+        self,
+        lease: ResearchJobLease,
+    ) -> bool:
+
+        statement = text("""
+            UPDATE j
+            SET status = 'paused',
+                execution_owner = NULL,
+                lease_expires_at = NULL,
+                lease_version = lease_version + 1
+            OUTPUT INSERTED.id
+            FROM dbo.research_jobs AS j
+            INNER JOIN dbo.research_sessions AS s
+                ON s.id = j.research_session_id
+            WHERE j.id = :job_id
+              AND j.execution_owner = :owner
+              AND j.lease_version = :version
+              AND j.status = 'claimed'
+              AND j.lease_expires_at > SYSUTCDATETIME()
+              AND s.pause_requested = 1
+              AND s.status <> 'completed'
+              AND (
+                    s.execution_owner IS NULL
+                    OR s.execution_lease_expires_at IS NULL
+                    OR s.execution_lease_expires_at <= SYSUTCDATETIME()
+                )
+        """)
+
+        try:
+
+            row = self.db.execute(
+                statement,
+                {
+                    "job_id": lease.job_id,
+                    "owner": lease.owner,
+                    "version": lease.version,
+                },
+            ).first()
+
+            self.db.commit()
+
+        except Exception:
+
+            self.db.rollback()
+            raise
+
+        return row is not None
+    
+
     def complete(
         self,
         lease: ResearchJobLease,
@@ -941,6 +1241,139 @@ class ResearchJobRepository:
             raise
 
         return row is not None
+
+
+    def reconcile_abandoned_pauses(
+        self,
+        limit: int = 100,
+    ) -> int:
+
+        if (
+            isinstance(limit, bool)
+            or not isinstance(limit, int)
+            or not 1 <= limit <= 1000
+        ):
+
+            raise ValueError(
+                "limit must be an integer from 1 to 1000"
+            )
+
+        statement = text("""
+            ;WITH abandoned_jobs AS (
+                SELECT TOP (:limit)
+                    j.id
+                FROM dbo.research_jobs AS j WITH (
+                    UPDLOCK,
+                    READPAST,
+                    ROWLOCK
+                )
+                INNER JOIN dbo.research_sessions AS s
+                    ON s.id = j.research_session_id
+                WHERE j.status = 'claimed'
+                  AND j.lease_expires_at <= SYSUTCDATETIME()
+                  AND s.pause_requested = 1
+                  AND s.status <> 'completed'
+                  AND (
+                      s.execution_owner IS NULL
+                      OR s.execution_lease_expires_at IS NULL
+                      OR s.execution_lease_expires_at
+                          <= SYSUTCDATETIME()
+                  )
+                ORDER BY j.id
+            )
+            UPDATE j
+            SET status = 'paused',
+                execution_owner = NULL,
+                lease_expires_at = NULL,
+                lease_version = lease_version + 1
+            OUTPUT INSERTED.id
+            FROM dbo.research_jobs AS j
+            INNER JOIN abandoned_jobs AS a
+                ON a.id = j.id
+        """)
+
+        try:
+
+            rows = self.db.execute(
+                statement,
+                {
+                    "limit": limit,
+                },
+            ).all()
+
+            reconciled_count = len(rows)
+
+            self.db.commit()
+
+        except Exception:
+
+            self.db.rollback()
+            raise
+
+        return reconciled_count
+
+    def reconcile_completed_jobs(
+        self,
+        limit: int = 100,
+    ) -> int:
+
+        if limit < 1:
+
+            raise ValueError(
+                "limit must be greater than zero"
+            )
+
+        statement = text("""
+            ;WITH completed_jobs AS (
+                SELECT TOP (:limit)
+                    j.id
+                FROM dbo.research_jobs AS j WITH (
+                    UPDLOCK,
+                    READPAST,
+                    ROWLOCK
+                )
+                INNER JOIN dbo.research_sessions AS s
+                    ON s.id = j.research_session_id
+                WHERE j.status = 'claimed'
+                  AND (
+                      j.lease_expires_at IS NULL
+                      OR j.lease_expires_at <= SYSUTCDATETIME()
+                  )
+                  AND s.status = 'completed'
+                ORDER BY j.id
+            )
+            UPDATE j
+            SET status = 'completed',
+                completed_at = SYSUTCDATETIME(),
+                execution_owner = NULL,
+                lease_expires_at = NULL,
+                lease_version = lease_version + 1,
+                last_error = NULL
+            FROM dbo.research_jobs AS j
+            INNER JOIN completed_jobs AS c
+                ON c.id = j.id
+        """)
+
+        try:
+
+            result = self.db.execute(
+                statement,
+                {
+                    "limit": limit,
+                },
+            )
+
+            reconciled_count = result.rowcount
+
+            self.db.commit()
+
+        except Exception:
+
+            self.db.rollback()
+            raise
+
+        return reconciled_count
+    
 
     def fail(
         self,

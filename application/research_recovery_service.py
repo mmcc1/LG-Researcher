@@ -150,6 +150,59 @@ class ResearchRecoveryService:
                 error=str(exc),
             )
 
+    def reconcile_completed_jobs(
+        self,
+        limit: int = 100,
+    ) -> int:
+
+        with self.session_factory() as db:
+
+            repository = ResearchJobRepository(
+                db
+            )
+
+            reconciled_count = (
+                repository.reconcile_completed_jobs(
+                    limit=limit,
+                )
+            )
+
+        if reconciled_count > 0:
+
+            logger.info(
+                "Reconciled %d completed research jobs.",
+                reconciled_count,
+            )
+
+        return reconciled_count
+
+
+    def reconcile_abandoned_pauses(
+        self,
+        limit: int = 100,
+    ) -> int:
+
+        with self.session_factory() as db:
+
+            repository = ResearchJobRepository(db)
+
+            reconciled_count = (
+                repository.reconcile_abandoned_pauses(
+                    limit=limit,
+                )
+            )
+
+        if reconciled_count > 0:
+
+            logger.info(
+                "Reconciled %d abandoned research "
+                "job pause requests.",
+                reconciled_count,
+            )
+
+        return reconciled_count
+    
+
     def recover(
         self,
         limit: int = 100,
@@ -164,6 +217,14 @@ class ResearchRecoveryService:
                 "Recovery cancelled before candidate discovery."
             )
             return []
+
+        self.reconcile_completed_jobs(
+            limit=limit,
+        )
+
+        self.reconcile_abandoned_pauses(
+            limit=limit
+        )
 
         candidates = self.find_candidates(
             limit=limit

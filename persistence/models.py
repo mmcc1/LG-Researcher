@@ -990,6 +990,17 @@ class PasswordResetRequest(Base):
 
     __tablename__ = "password_reset_requests"
 
+    __table_args__ = (
+        Index(
+            "ux_password_reset_requests_pending",
+            "user_id",
+            unique=True,
+            mssql_where=text(
+                "status = 'pending'"
+            ),
+        ),
+    )
+
     id: Mapped[str] = mapped_column(
         String(36),
         primary_key=True,

@@ -118,10 +118,52 @@ class ResearchJobWorker:
 
                 try:
 
-                    self.workflow_service.execute_existing(
-                        session_id=session_id,
-                        execution_guard=heartbeat.check,
+                    workflow_result = (
+                        self.workflow_service.execute_existing(
+                            session_id=session_id,
+                            execution_guard=heartbeat.check,
+                        )
                     )
+
+                    graph_result = workflow_result.graph_result
+
+                    paused = (
+                        isinstance(graph_result, dict)
+                        and graph_result.get("pause_requested") is True
+                    )
+
+                    if paused:
+
+                        heartbeat.check()
+
+                        with self.session_factory() as db:
+
+                            repository = ResearchJobRepository(db)
+
+                            pause_completed = (
+                                repository.pause_claimed(
+                                    heartbeat.lease
+                                )
+                            )
+
+                        if pause_completed:
+
+                            logger.info(
+                                "Paused research job %s "
+                                "with session %s",
+                                claimed.job_id,
+                                session_id,
+                            )
+
+                            return claimed.job_id
+                                                
+                        heartbeat.check()
+
+                        raise ResearchJobNotCompleted(
+                            "Research workflow returned after "
+                            "a pause request, but the job "
+                            "could not be transitioned to paused."
+                        )
 
                 except (
                     ResearchJobLeaseLost,
