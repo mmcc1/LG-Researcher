@@ -7,7 +7,7 @@ from langchain_core.messages import (
 )
 
 from domain.report import ResearchReport
-
+from config import settings
 
 class ReportAgent:
 
@@ -19,6 +19,18 @@ class ReportAgent:
             model.with_structured_output(
                 ResearchReport
             )
+        )
+
+        self.target_word_count = (
+            settings.research.report_target_word_count
+        )
+
+        self.min_word_count = (
+            settings.research.report_min_word_count
+        )
+
+        self.max_word_count = (
+            settings.research.report_max_word_count
         )
 
     def generate(
@@ -133,6 +145,39 @@ gaps, unresolved contradictions, insufficient
 evidence, and other significant limitations identified
 in the reviewed material.
 """.strip()
+
+        length_guidance = f"""
+REPORT LENGTH GUIDANCE
+
+Aim for approximately {self.target_word_count} words
+across the complete report.
+
+The preferred length range is
+{self.min_word_count} to {self.max_word_count} words.
+
+Allocate the available words proportionately across
+the executive summary, main sections, conclusions,
+and limitations.
+
+Give more space to subjects supported by substantial
+reviewed evidence.
+
+Do not add unsupported information, repetition, or
+unnecessary sections merely to reach the target length.
+
+Do not omit important evidence, contradictions,
+uncertainty, or limitations merely to satisfy a
+word-count target.
+
+Evidence quality and provenance requirements take
+priority over report length.
+""".strip()
+
+        system_prompt = (
+            system_prompt
+            + "\n\n"
+            + length_guidance
+        )
 
         user_prompt = f"""
 RESEARCH TOPIC:

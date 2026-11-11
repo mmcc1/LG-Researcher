@@ -7,7 +7,10 @@ Frontend (a web UI for admins and users)
 
 This app uses a MSSQL backend over TCP/IP and requires an SQL account.
 Create a DB, call it 'Researcher' and allow the user account access.
-Add the details to .env and run create_database.py.
+Download:
+ODBC Driver 18 for SQL Server
+https://learn.microsoft.com/en-us/sql/connect/odbc/download-odbc-driver-for-sql-server?view=sql-server-ver17
+Add the SQL account details to .env and run create_database.py.
 
 
 Installation Intructions (recovery_worker.py)
@@ -25,11 +28,29 @@ Installation Intructions (recovery_worker.py)
   .\.venv\Scripts\python -m pip install -r requirements.txt
 5. Create a .env file and add the following contents (if using Ollama and Qwen3:8b):
 
+# LLM_PROVIDER=openai
+# OPENAI_API_KEY=your-api-key-here
+
+# PLANNER_MODEL=gpt-4.1-mini
+# RESEARCHER_MODEL=gpt-4.1-mini
+# SUMMARISER_MODEL=gpt-4.1-mini
+# REVIEWER_MODEL=gpt-4.1
+# REPORTER_MODEL=gpt-4.1
+# CONTROLLER_MODEL=gpt-4.1-mini
+
 PLANNER_PROVIDER=ollama
 PLANNER_MODEL=qwen3:8b
 PLANNER_BASE_URL=http://localhost:11434
 PLANNER_TEMPERATURE=0.2
 PLANNER_TIMEOUT_SECONDS=900
+
+#Example OpenAI usage
+#
+# PLANNER_PROVIDER=openai
+# PLANNER_MODEL=gpt-4.1-mini
+# PLANNER_BASE_URL=
+# PLANNER_TEMPERATURE=0.2
+# PLANNER_TIMEOUT_SECONDS=900
 
 RESEARCHER_PROVIDER=ollama
 RESEARCHER_MODEL=qwen3:8b
@@ -64,10 +85,24 @@ CONTROLLER_TIMEOUT_SECONDS=900
 DB_SERVER=localhost
 DB_PORT=1433
 DB_NAME=Researcher
-DB_USERNAME=<USERNAME>
-DB_PASSWORD=<PASSWORD>
+DB_USERNAME=lcdev
+DB_PASSWORD=p@ssw0rd11
 DB_DRIVER=ODBC Driver 18 for SQL Server
 DB_TRUST_SERVER_CERTIFICATE=yes
+
+REPORT_OUTPUT_DIRECTORY=C:\reports
+
+RESEARCH_QUESTION_COUNT=2
+SEARCH_MAX_QUERIES=2
+SEARCH_RESULTS_PER_QUERY=3
+RETRIEVAL_MAX_SOURCES=2
+
+TEXT_CHUNKING_ENABLED=false
+SOURCE_CONTEXT_MAX_CHARACTERS=8000
+
+REPORT_TARGET_WORD_COUNT=1500
+REPORT_MIN_WORD_COUNT=1200
+REPORT_MAX_WORD_COUNT=1800
 
 6. Download WinSW to LGResearchRecovery
 
@@ -175,6 +210,322 @@ Status	      Get-Service -Name LGResearchRecovery
 Targeted Recovery
 python recovery_worker.py --once --session-id 25445ae3-c9c4-49c7-a0c6-04fd748c6b42
 
-
+$source = <root folder of LGResearcher source>
 $destination = "C:\Services\LGResearchRecovery\app" 
 robocopy $source $destination /E /XD .venv .git node_modules __pycache__ .pytest_cache .mypy_cache .ruff_cache frontend tests /XF *.pyc *.pyo *.db
+
+
+
+Useful SQL
+
+Purge everything related to a job
+
+
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+
+DECLARE @JobId VARCHAR(36) =
+    'b9e82da9-8777-4504-acd7-69dd80640a89';
+
+DECLARE @SessionId VARCHAR(36);
+
+BEGIN TRY
+
+    BEGIN TRANSACTION;
+
+    --------------------------------------------------
+    -- Find the job and its research session.
+    --------------------------------------------------
+
+    SELECT
+        @SessionId = research_session_id
+    FROM dbo.research_jobs WITH (
+        UPDLOCK,
+        HOLDLOCK
+    )
+    WHERE id = @JobId;
+
+    IF @@ROWCOUNT = 0
+    BEGIN
+        THROW 50001,
+            'Research job was not found.',
+            1;
+    END;
+
+    --------------------------------------------------
+    -- Reject active execution.
+    --------------------------------------------------
+
+    IF EXISTS (
+        SELECT 1
+        FROM dbo.research_jobs
+        WHERE id = @JobId
+          AND execution_owner IS NOT NULL
+          AND lease_expires_at > SYSUTCDATETIME()
+    )
+    BEGIN
+        THROW 50002,
+            'Research job has an active execution lease.',
+            1;
+    END;
+
+    IF @SessionId IS NOT NULL
+       AND EXISTS (
+            SELECT 1
+            FROM dbo.research_sessions
+            WHERE id = @SessionId
+              AND execution_owner IS NOT NULL
+              AND execution_lease_expires_at > SYSUTCDATETIME()
+       )
+    BEGIN
+        THROW 50003,
+            'Research session has an active execution lease.',
+            1;
+    END;
+
+    --------------------------------------------------
+    -- Protect research sessions belonging to
+    -- another job.
+    --------------------------------------------------
+
+    IF @SessionId IS NOT NULL
+       AND EXISTS (
+            SELECT 1
+            FROM dbo.research_jobs
+            WHERE research_session_id = @SessionId
+              AND id <> @JobId
+       )
+    BEGIN
+        THROW 50004,
+            'Research session is referenced by another job.',
+            1;
+    END;
+
+    PRINT 'Purging job: ' + @JobId;
+
+    --------------------------------------------------
+    -- Delete all research data if a session exists.
+    --------------------------------------------------
+
+    IF @SessionId IS NOT NULL
+    BEGIN
+
+        PRINT 'Research session: ' + @SessionId;
+
+        --------------------------------------------------
+        -- Report provenance.
+        --------------------------------------------------
+
+        DELETE rsc
+        FROM dbo.report_section_claims AS rsc
+        INNER JOIN dbo.report_sections AS rs
+            ON rs.id = rsc.report_section_id
+        INNER JOIN dbo.research_reports AS rr
+            ON rr.id = rs.research_report_id
+        WHERE rr.research_session_id = @SessionId;
+
+        --------------------------------------------------
+        -- Report limitations.
+        --------------------------------------------------
+
+        DELETE rl
+        FROM dbo.report_limitations AS rl
+        INNER JOIN dbo.research_reports AS rr
+            ON rr.id = rl.research_report_id
+        WHERE rr.research_session_id = @SessionId;
+
+        --------------------------------------------------
+        -- Report sections.
+        --------------------------------------------------
+
+        DELETE rs
+        FROM dbo.report_sections AS rs
+        INNER JOIN dbo.research_reports AS rr
+            ON rr.id = rs.research_report_id
+        WHERE rr.research_session_id = @SessionId;
+
+        --------------------------------------------------
+        -- Reports.
+        --------------------------------------------------
+
+        DELETE FROM dbo.research_reports
+        WHERE research_session_id = @SessionId;
+
+        --------------------------------------------------
+        -- Reviewed claim support.
+        --------------------------------------------------
+
+        DELETE rcs
+        FROM dbo.reviewed_claim_support AS rcs
+        INNER JOIN dbo.reviewed_claims AS rc
+            ON rc.id = rcs.reviewed_claim_id
+        INNER JOIN dbo.question_reviews AS qr
+            ON qr.id = rc.question_review_id
+        INNER JOIN dbo.research_questions AS rq
+            ON rq.id = qr.research_question_id
+        WHERE rq.research_session_id = @SessionId;
+
+        --------------------------------------------------
+        -- Reviewed claim contradictions.
+        --------------------------------------------------
+
+        DELETE rcc
+        FROM dbo.reviewed_claim_contradictions AS rcc
+        INNER JOIN dbo.reviewed_claims AS rc
+            ON rc.id = rcc.reviewed_claim_id
+        INNER JOIN dbo.question_reviews AS qr
+            ON qr.id = rc.question_review_id
+        INNER JOIN dbo.research_questions AS rq
+            ON rq.id = qr.research_question_id
+        WHERE rq.research_session_id = @SessionId;
+
+        --------------------------------------------------
+        -- Reviewed claims.
+        --------------------------------------------------
+
+        DELETE rc
+        FROM dbo.reviewed_claims AS rc
+        INNER JOIN dbo.question_reviews AS qr
+            ON qr.id = rc.question_review_id
+        INNER JOIN dbo.research_questions AS rq
+            ON rq.id = qr.research_question_id
+        WHERE rq.research_session_id = @SessionId;
+
+        --------------------------------------------------
+        -- Review contradictions.
+        --------------------------------------------------
+
+        DELETE c
+        FROM dbo.review_contradictions AS c
+        INNER JOIN dbo.question_reviews AS qr
+            ON qr.id = c.question_review_id
+        INNER JOIN dbo.research_questions AS rq
+            ON rq.id = qr.research_question_id
+        WHERE rq.research_session_id = @SessionId;
+
+        --------------------------------------------------
+        -- Review evidence gaps.
+        --------------------------------------------------
+
+        DELETE g
+        FROM dbo.review_evidence_gaps AS g
+        INNER JOIN dbo.question_reviews AS qr
+            ON qr.id = g.question_review_id
+        INNER JOIN dbo.research_questions AS rq
+            ON rq.id = qr.research_question_id
+        WHERE rq.research_session_id = @SessionId;
+
+        --------------------------------------------------
+        -- Question reviews.
+        --------------------------------------------------
+
+        DELETE qr
+        FROM dbo.question_reviews AS qr
+        INNER JOIN dbo.research_questions AS rq
+            ON rq.id = qr.research_question_id
+        WHERE rq.research_session_id = @SessionId;
+
+        --------------------------------------------------
+        -- Findings.
+        --------------------------------------------------
+
+        DELETE f
+        FROM dbo.findings AS f
+        INNER JOIN dbo.research_questions AS rq
+            ON rq.id = f.research_question_id
+        WHERE rq.research_session_id = @SessionId;
+
+        --------------------------------------------------
+        -- Source summaries.
+        --------------------------------------------------
+
+        DELETE ss
+        FROM dbo.source_summaries AS ss
+        INNER JOIN dbo.research_questions AS rq
+            ON rq.id = ss.research_question_id
+        WHERE rq.research_session_id = @SessionId;
+
+        --------------------------------------------------
+        -- Sources.
+        --------------------------------------------------
+
+        DELETE FROM dbo.sources
+        WHERE research_session_id = @SessionId;
+
+        --------------------------------------------------
+        -- Search results.
+        --------------------------------------------------
+
+        DELETE FROM dbo.web_search_results
+        WHERE research_session_id = @SessionId;
+
+        --------------------------------------------------
+        -- Search attempts.
+        --------------------------------------------------
+
+        DELETE FROM dbo.search_attempts
+        WHERE research_session_id = @SessionId;
+
+        --------------------------------------------------
+        -- Research questions.
+        --------------------------------------------------
+
+        DELETE FROM dbo.research_questions
+        WHERE research_session_id = @SessionId;
+
+    END
+    ELSE
+    BEGIN
+
+        PRINT 'Job has no research session.';
+        PRINT 'Deleting job-level records only.';
+
+    END;
+
+    --------------------------------------------------
+    -- Delete job questions.
+    --------------------------------------------------
+
+    DELETE FROM dbo.research_job_questions
+    WHERE research_job_id = @JobId;
+
+    --------------------------------------------------
+    -- Delete job.
+    --------------------------------------------------
+
+    DELETE FROM dbo.research_jobs
+    WHERE id = @JobId;
+
+    --------------------------------------------------
+    -- Delete research session if present.
+    --------------------------------------------------
+
+    IF @SessionId IS NOT NULL
+    BEGIN
+
+        DELETE FROM dbo.research_sessions
+        WHERE id = @SessionId;
+
+    END;
+
+    COMMIT TRANSACTION;
+
+    PRINT '';
+    PRINT 'Research job purge completed successfully.';
+
+END TRY
+
+BEGIN CATCH
+
+    IF @@TRANCOUNT > 0
+    BEGIN
+        ROLLBACK TRANSACTION;
+    END;
+
+    PRINT '';
+    PRINT 'Research job purge FAILED.';
+    PRINT ERROR_MESSAGE();
+
+    THROW;
+
+END CATCH;

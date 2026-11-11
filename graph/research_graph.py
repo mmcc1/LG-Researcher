@@ -141,6 +141,8 @@ from nodes.check_pause import (
     CheckPauseNode,
 )
 
+from config import settings
+
 
 def route_pause(
     state: ResearchState,
@@ -180,8 +182,12 @@ def create_research_graph(
     )
 
     text_chunker = TextChunker(
-        chunk_size=4000,
-        overlap=400,
+        chunk_size=(
+            settings.research.text_chunk_size
+        ),
+        overlap=(
+            settings.research.text_chunk_overlap
+        ),
     )
 
     chunk_ranker = (
@@ -192,8 +198,15 @@ def create_research_graph(
         SourceContextBuilder(
             chunker=text_chunker,
             ranker=chunk_ranker,
-            max_chunks=3,
-            max_characters=10000,
+            max_chunks=(
+                settings.research.source_context_max_chunks
+            ),
+            max_characters=(
+                settings.research.source_context_max_characters
+            ),
+            chunking_enabled=(
+                settings.research.text_chunking_enabled
+            ),
         )
     )
 
@@ -208,7 +221,9 @@ def create_research_graph(
             extractor=(
                 document_extractor
             ),
-            max_sources=5,
+            max_sources=(
+                settings.research.retrieval_max_sources
+            ),
         )
     )
 
@@ -280,7 +295,9 @@ def create_research_graph(
             search_provider=(
                 search_provider
             ),
-            results_per_query=5,
+            results_per_query=(
+                settings.research.search_results_per_query
+            ),
         )
     )
 

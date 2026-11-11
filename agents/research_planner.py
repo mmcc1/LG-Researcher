@@ -15,6 +15,8 @@ from graph.state import (
     ResearchState,
 )
 
+from config import settings
+
 
 class ResearchPlanner:
 
@@ -26,6 +28,10 @@ class ResearchPlanner:
             model.with_structured_output(
                 ResearchPlan
             )
+        )
+
+        self.question_count = (
+            settings.research.question_count
         )
 
     @staticmethod
@@ -123,6 +129,15 @@ class ResearchPlanner:
                 "have been supplied."
             )
 
+        requested_count = len(
+            requested_questions
+        )
+
+        additional_count = max(
+            self.question_count - requested_count,
+            0,
+        )
+
         messages = [
             SystemMessage(
                 content=(
@@ -160,6 +175,12 @@ class ResearchPlanner:
 
                     "Avoid duplicate questions. "
 
+                    "The total target number of research "
+                    "questions is supplied separately. "
+                    "User-defined questions take priority. "
+                    "Generate only the number of additional "
+                    "questions requested. "
+
                     "Do not answer the questions. "
 
                     "Each additional question must be "
@@ -180,7 +201,13 @@ class ResearchPlanner:
                     f"Research topic:\n"
                     f"{topic}\n\n"
                     f"{scope_text}\n\n"
-                    f"{user_questions_text}"
+                    f"{user_questions_text}\n\n"
+                    "Target total research questions: "
+                    f"{self.question_count}\n"
+                    "User-defined questions: "
+                    f"{requested_count}\n"
+                    "Additional questions requested: "
+                    f"{additional_count}"
                 )
             ),
         ]
@@ -210,6 +237,12 @@ class ResearchPlanner:
             matching_question = None
 
             for planned_question in planned_questions:
+
+                if (
+                    len(merged_questions)
+                    >= self.question_count
+                ):
+                    break
 
                 planned_normalized = (
                     self._normalize_question(

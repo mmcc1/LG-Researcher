@@ -14,17 +14,41 @@ class SourceContextBuilder:
         ranker: QuestionChunkRanker,
         max_chunks: int = 3,
         max_characters: int = 10000,
+        chunking_enabled: bool = True,
     ):
         self.chunker = chunker
         self.ranker = ranker
         self.max_chunks = max_chunks
         self.max_characters = max_characters
+        self.chunking_enabled = chunking_enabled
 
     def build(
         self,
         question: str,
         source_text: str,
     ) -> tuple[str, int, int]:
+
+        if not self.chunking_enabled:
+
+            source_text = source_text.strip()
+
+            if not source_text:
+
+                return (
+                    "",
+                    0,
+                    0,
+                )
+
+            context = source_text[
+                :self.max_characters
+            ]
+
+            return (
+                context,
+                1,
+                1,
+            )
 
         chunks = self.chunker.split(
             source_text

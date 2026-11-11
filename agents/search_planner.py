@@ -7,7 +7,7 @@ from langchain_core.messages import (
 )
 
 from domain.search import SearchPlan
-
+from config import settings
 
 class SearchPlanner:
 
@@ -19,6 +19,10 @@ class SearchPlanner:
             model.with_structured_output(
                 SearchPlan
             )
+        )
+
+        self.max_queries = (
+            settings.research.search_max_queries
         )
 
     def create_plan(
@@ -236,7 +240,8 @@ class SearchPlanner:
                     "counter-evidence search, use them only "
                     "as propositions to test. "
                     "\n\n"
-                    "Generate at most 3 search queries. "
+                    "Generate at most "
+                    f"{self.max_queries} search queries. "
                     "Prefer precise queries over broad "
                     "queries."
                 )
@@ -247,6 +252,13 @@ class SearchPlanner:
             ),
         ]
 
-        return self.structured_model.invoke(
+        plan = self.structured_model.invoke(
             messages
         )
+
+        if plan is None:
+            raise ValueError(
+                "Search planner returned no plan."
+            )
+
+        return plan
