@@ -1,0 +1,9 @@
+These tests were made over the course of development.  They may 
+or may not be functional. They may also test features that may
+not have been fully implemented. Run them at your own risk. The
+worst that will happen is that it will contaminate your DB. To 
+run, move to the root folder of the app and execute.  Some of 
+these tests employ pytest and need to be executed with
+appropriate arguments.
+
+Think of them as starting points for your own tests.

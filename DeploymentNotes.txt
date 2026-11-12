@@ -2,18 +2,33 @@ There are four parts to this software:
 
 recovery_worker.py (a service that heals failures)
 worker.py (performs the main research)
-FAST API (exposes an API to control the researcher)
+FAST API (exposes an API to control the researcher from api/main)
 Frontend (a web UI for admins and users)
+
+
+The below instructions are for Windows.  The app should run on Linux too, but hasn't been tested.
+I've kept most things platform agnostic.  Note that these instructions are for development on a single server.  In
+production the settings for the Caddy frontend will need to be modified.  If you want to expose 
+the FAST API for integration purposes, it too will need to be modified.
+
+Commercial license, expansion and integration advice/services can be obtained.  Just email:
+
+info@marxbitware.co.uk
+
+Download and install the latest version of python, node and npm.
 
 This app uses a MSSQL backend over TCP/IP and requires an SQL account.
 Create a DB, call it 'Researcher' and allow the user account access.
+
 Download:
 ODBC Driver 18 for SQL Server
 https://learn.microsoft.com/en-us/sql/connect/odbc/download-odbc-driver-for-sql-server?view=sql-server-ver17
 Add the SQL account details to .env and run create_database.py.
 
 
-Installation Intructions (recovery_worker.py)
+
+
+Installation Instructions (recovery_worker.py)
 
 1. Create a folder called 'Services' on C:
 2. Create a sub folder called 'LGResearchRecovery'
@@ -22,10 +37,15 @@ Installation Intructions (recovery_worker.py)
     health
     logs
 4. Copy source of LGResearcher to the app folder 
-  app folder of service (C:\Services\LGResearchRecovery\app)
-  py -m venv .venv
-  .\.venv\Scripts\python.exe -m pip install --upgrade pip
-  .\.venv\Scripts\python -m pip install -r requirements.txt
+
+    $source = "<REPLACE_WITH_LGRESEARCHER_ROOT_FOLDER>"
+    $destination = "C:\Services\LGResearchRecovery\app" 
+    robocopy $source $destination /E /XD .venv .git node_modules __pycache__ .pytest_cache .mypy_cache .ruff_cache frontend tests /XF *.pyc *.pyo *.db
+
+    In the app folder of service (C:\Services\LGResearchRecovery\app) open a terminal:
+        py -m venv .venv
+        .\.venv\Scripts\python.exe -m pip install --upgrade pip
+        .\.venv\Scripts\python -m pip install -r requirements.txt
 5. Create a .env file and add the following contents (if using Ollama and Qwen3:8b):
 
 # LLM_PROVIDER=openai
@@ -113,7 +133,7 @@ https://github.com/winsw/winsw
 
 https://github.com/winsw/winsw/releases/download/v2.12.0/WinSW-x64.exe
 
-7. Rename the WinSW-x64.exe to LGResearchRecovery.exe
+7. Rename the WinSW-x64.exe to LGResearchRecovery.exe and place in C:\Services\LGResearchRecovery folder
 
 
 8. Create a file called LGResearchRecovery.xml in the LGResearchRecovery folder.  Replace
@@ -151,7 +171,7 @@ the text with that provided below:
   </log>
 </service>
 
-9. Register and start:
+9. Register and start (Admin Terminal):
 # Install the Windows service
 .\LGResearchRecovery.exe install
 
@@ -163,369 +183,278 @@ the text with that provided below:
 
 
 
-worker.py
-Will eventually run as a service.  For now, just execute in a terminal
 
 
-FAST API
-From app root:
-$env:LG_RESEARCHER_API_ENV = "development"
-$env:LG_RESEARCHER_ALLOWED_ORIGINS = "http://localhost:5173,http://127.0.0.1:5173,http://127.0.0.1:8000"
-$env:RESEARCH_RECOVERY_HEALTH_FILE = "C:\Services\LGResearchRecovery\health\recovery-health.json"
-python -m uvicorn api.main:app --reload --host 127.0.0.1 --port 8000
 
 
-React Frontend
-Launch from frontend folder (VITE v8.3.6)
-npm dev run
+Installation Instructions (worker.py)
 
+1. Navigate to the folder called 'Services' on C:
+2. Create a sub folder called 'LGResearchWorker'
+3. Create the following folders under LGResearchWorker:
+    app
+    health
+    logs
+4. Copy source of LGResearcher to the app folder 
 
+    $source = "<REPLACE_WITH_LGRESEARCHER_ROOT_FOLDER>"
+    $destination = "C:\Services\LGResearchWorker\app" 
+    robocopy $source $destination /E /XD .venv .git node_modules __pycache__ .pytest_cache .mypy_cache .ruff_cache frontend tests /XF *.pyc *.pyo *.db
 
-Dev notes
+    In the app folder of service (C:\Services\LGResearchWorker\app) open a terminal:
+        py -m venv .venv
+        .\.venv\Scripts\python.exe -m pip install --upgrade pip
+        .\.venv\Scripts\python -m pip install -r requirements.txt
+5. Copy the .env file from LGResearchRecovery
 
+6. Download WinSW to LGResearchWorker
 
-app folder of service
-.\.venv\Scripts\python -m pip install -r requirements.txt
+Worker Service
 
+Uses Windows Service Wrapper
+https://github.com/winsw/winsw
 
-Start-Service -Name LGResearchRecovery
+https://github.com/winsw/winsw/releases/download/v2.12.0/WinSW-x64.exe
 
-Get-Service -Name LGResearchRecovery
+7. Rename the WinSW-x64.exe to LGResearchWorker.exe and place in C:\Services\LGResearchWorker folder
 
-Get-Content ".\health\recovery-health.json" | ConvertFrom-Json | Format-List
 
-Get-ChildItem ".\logs" | Sort-Object LastWriteTime -Descending
+8. Create a file called LGResearchWorker.xml in the LGResearchWorker folder.  Replace
+the text with that provided below:
 
-.\LGResearchRecovery.exe start
-.\LGResearchRecovery.exe stop
-.\LGResearchRecovery.exe status
+<service>
+  <id>LGResearchWorker</id>
+  <name>LG Research Worker</name>
 
+  <description>
+    Processes queued LangGraph research jobs.
+  </description>
 
-Operation	    PowerShell command
-Start	        Start-Service -Name LGResearchRecovery
-Stop	        Stop-Service -Name LGResearchRecovery
-Restart	      Restart-Service -Name LGResearchRecovery
-Status	      Get-Service -Name LGResearchRecovery
+  <executable>%BASE%\app\.venv\Scripts\python.exe</executable>
+  <arguments>-u "%BASE%\app\worker.py"</arguments>
 
-Targeted Recovery
-python recovery_worker.py --once --session-id 25445ae3-c9c4-49c7-a0c6-04fd748c6b42
+  <workingdirectory>%BASE%\app</workingdirectory>
 
-$source = <root folder of LGResearcher source>
-$destination = "C:\Services\LGResearchRecovery\app" 
-robocopy $source $destination /E /XD .venv .git node_modules __pycache__ .pytest_cache .mypy_cache .ruff_cache frontend tests /XF *.pyc *.pyo *.db
+  <env name="PYTHONUNBUFFERED" value="1"/>
+  <env name="PYTHONUTF8" value="1"/>
 
+  <startmode>Automatic</startmode>
+  <delayedAutoStart>true</delayedAutoStart>
 
+  <onfailure action="restart" delay="10 sec"/>
 
-Useful SQL
+  <stoptimeout>5 min</stoptimeout>
 
-Purge everything related to a job
+  <logpath>%BASE%\logs</logpath>
 
+  <log mode="roll-by-size">
+    <sizeThreshold>10240</sizeThreshold>
+    <keepFiles>10</keepFiles>
+  </log>
+</service>
 
-SET NOCOUNT ON;
-SET XACT_ABORT ON;
+9. Register and start (Admin Terminal):
+# Install the Windows service
+.\LGResearchWorker.exe install
 
-DECLARE @JobId VARCHAR(36) =
-    'b9e82da9-8777-4504-acd7-69dd80640a89';
+# Start the service
+.\LGResearchWorker.exe start
 
-DECLARE @SessionId VARCHAR(36);
+# Check service status
+.\LGResearchWorker.exe status
 
-BEGIN TRY
 
-    BEGIN TRANSACTION;
 
-    --------------------------------------------------
-    -- Find the job and its research session.
-    --------------------------------------------------
 
-    SELECT
-        @SessionId = research_session_id
-    FROM dbo.research_jobs WITH (
-        UPDLOCK,
-        HOLDLOCK
-    )
-    WHERE id = @JobId;
 
-    IF @@ROWCOUNT = 0
-    BEGIN
-        THROW 50001,
-            'Research job was not found.',
-            1;
-    END;
 
-    --------------------------------------------------
-    -- Reject active execution.
-    --------------------------------------------------
+Installation Instructions (FAST API)
 
-    IF EXISTS (
-        SELECT 1
-        FROM dbo.research_jobs
-        WHERE id = @JobId
-          AND execution_owner IS NOT NULL
-          AND lease_expires_at > SYSUTCDATETIME()
-    )
-    BEGIN
-        THROW 50002,
-            'Research job has an active execution lease.',
-            1;
-    END;
-
-    IF @SessionId IS NOT NULL
-       AND EXISTS (
-            SELECT 1
-            FROM dbo.research_sessions
-            WHERE id = @SessionId
-              AND execution_owner IS NOT NULL
-              AND execution_lease_expires_at > SYSUTCDATETIME()
-       )
-    BEGIN
-        THROW 50003,
-            'Research session has an active execution lease.',
-            1;
-    END;
-
-    --------------------------------------------------
-    -- Protect research sessions belonging to
-    -- another job.
-    --------------------------------------------------
-
-    IF @SessionId IS NOT NULL
-       AND EXISTS (
-            SELECT 1
-            FROM dbo.research_jobs
-            WHERE research_session_id = @SessionId
-              AND id <> @JobId
-       )
-    BEGIN
-        THROW 50004,
-            'Research session is referenced by another job.',
-            1;
-    END;
-
-    PRINT 'Purging job: ' + @JobId;
-
-    --------------------------------------------------
-    -- Delete all research data if a session exists.
-    --------------------------------------------------
-
-    IF @SessionId IS NOT NULL
-    BEGIN
-
-        PRINT 'Research session: ' + @SessionId;
-
-        --------------------------------------------------
-        -- Report provenance.
-        --------------------------------------------------
-
-        DELETE rsc
-        FROM dbo.report_section_claims AS rsc
-        INNER JOIN dbo.report_sections AS rs
-            ON rs.id = rsc.report_section_id
-        INNER JOIN dbo.research_reports AS rr
-            ON rr.id = rs.research_report_id
-        WHERE rr.research_session_id = @SessionId;
-
-        --------------------------------------------------
-        -- Report limitations.
-        --------------------------------------------------
-
-        DELETE rl
-        FROM dbo.report_limitations AS rl
-        INNER JOIN dbo.research_reports AS rr
-            ON rr.id = rl.research_report_id
-        WHERE rr.research_session_id = @SessionId;
-
-        --------------------------------------------------
-        -- Report sections.
-        --------------------------------------------------
-
-        DELETE rs
-        FROM dbo.report_sections AS rs
-        INNER JOIN dbo.research_reports AS rr
-            ON rr.id = rs.research_report_id
-        WHERE rr.research_session_id = @SessionId;
-
-        --------------------------------------------------
-        -- Reports.
-        --------------------------------------------------
-
-        DELETE FROM dbo.research_reports
-        WHERE research_session_id = @SessionId;
-
-        --------------------------------------------------
-        -- Reviewed claim support.
-        --------------------------------------------------
-
-        DELETE rcs
-        FROM dbo.reviewed_claim_support AS rcs
-        INNER JOIN dbo.reviewed_claims AS rc
-            ON rc.id = rcs.reviewed_claim_id
-        INNER JOIN dbo.question_reviews AS qr
-            ON qr.id = rc.question_review_id
-        INNER JOIN dbo.research_questions AS rq
-            ON rq.id = qr.research_question_id
-        WHERE rq.research_session_id = @SessionId;
-
-        --------------------------------------------------
-        -- Reviewed claim contradictions.
-        --------------------------------------------------
-
-        DELETE rcc
-        FROM dbo.reviewed_claim_contradictions AS rcc
-        INNER JOIN dbo.reviewed_claims AS rc
-            ON rc.id = rcc.reviewed_claim_id
-        INNER JOIN dbo.question_reviews AS qr
-            ON qr.id = rc.question_review_id
-        INNER JOIN dbo.research_questions AS rq
-            ON rq.id = qr.research_question_id
-        WHERE rq.research_session_id = @SessionId;
-
-        --------------------------------------------------
-        -- Reviewed claims.
-        --------------------------------------------------
-
-        DELETE rc
-        FROM dbo.reviewed_claims AS rc
-        INNER JOIN dbo.question_reviews AS qr
-            ON qr.id = rc.question_review_id
-        INNER JOIN dbo.research_questions AS rq
-            ON rq.id = qr.research_question_id
-        WHERE rq.research_session_id = @SessionId;
-
-        --------------------------------------------------
-        -- Review contradictions.
-        --------------------------------------------------
-
-        DELETE c
-        FROM dbo.review_contradictions AS c
-        INNER JOIN dbo.question_reviews AS qr
-            ON qr.id = c.question_review_id
-        INNER JOIN dbo.research_questions AS rq
-            ON rq.id = qr.research_question_id
-        WHERE rq.research_session_id = @SessionId;
-
-        --------------------------------------------------
-        -- Review evidence gaps.
-        --------------------------------------------------
-
-        DELETE g
-        FROM dbo.review_evidence_gaps AS g
-        INNER JOIN dbo.question_reviews AS qr
-            ON qr.id = g.question_review_id
-        INNER JOIN dbo.research_questions AS rq
-            ON rq.id = qr.research_question_id
-        WHERE rq.research_session_id = @SessionId;
-
-        --------------------------------------------------
-        -- Question reviews.
-        --------------------------------------------------
-
-        DELETE qr
-        FROM dbo.question_reviews AS qr
-        INNER JOIN dbo.research_questions AS rq
-            ON rq.id = qr.research_question_id
-        WHERE rq.research_session_id = @SessionId;
-
-        --------------------------------------------------
-        -- Findings.
-        --------------------------------------------------
-
-        DELETE f
-        FROM dbo.findings AS f
-        INNER JOIN dbo.research_questions AS rq
-            ON rq.id = f.research_question_id
-        WHERE rq.research_session_id = @SessionId;
-
-        --------------------------------------------------
-        -- Source summaries.
-        --------------------------------------------------
-
-        DELETE ss
-        FROM dbo.source_summaries AS ss
-        INNER JOIN dbo.research_questions AS rq
-            ON rq.id = ss.research_question_id
-        WHERE rq.research_session_id = @SessionId;
-
-        --------------------------------------------------
-        -- Sources.
-        --------------------------------------------------
-
-        DELETE FROM dbo.sources
-        WHERE research_session_id = @SessionId;
-
-        --------------------------------------------------
-        -- Search results.
-        --------------------------------------------------
-
-        DELETE FROM dbo.web_search_results
-        WHERE research_session_id = @SessionId;
-
-        --------------------------------------------------
-        -- Search attempts.
-        --------------------------------------------------
-
-        DELETE FROM dbo.search_attempts
-        WHERE research_session_id = @SessionId;
-
-        --------------------------------------------------
-        -- Research questions.
-        --------------------------------------------------
-
-        DELETE FROM dbo.research_questions
-        WHERE research_session_id = @SessionId;
-
-    END
-    ELSE
-    BEGIN
-
-        PRINT 'Job has no research session.';
-        PRINT 'Deleting job-level records only.';
-
-    END;
-
-    --------------------------------------------------
-    -- Delete job questions.
-    --------------------------------------------------
-
-    DELETE FROM dbo.research_job_questions
-    WHERE research_job_id = @JobId;
-
-    --------------------------------------------------
-    -- Delete job.
-    --------------------------------------------------
-
-    DELETE FROM dbo.research_jobs
-    WHERE id = @JobId;
-
-    --------------------------------------------------
-    -- Delete research session if present.
-    --------------------------------------------------
-
-    IF @SessionId IS NOT NULL
-    BEGIN
-
-        DELETE FROM dbo.research_sessions
-        WHERE id = @SessionId;
-
-    END;
-
-    COMMIT TRANSACTION;
-
-    PRINT '';
-    PRINT 'Research job purge completed successfully.';
-
-END TRY
-
-BEGIN CATCH
-
-    IF @@TRANCOUNT > 0
-    BEGIN
-        ROLLBACK TRANSACTION;
-    END;
-
-    PRINT '';
-    PRINT 'Research job purge FAILED.';
-    PRINT ERROR_MESSAGE();
-
-    THROW;
-
-END CATCH;
+1. Navigate to the folder called 'Services' on C:
+2. Create a sub folder called 'LGResearchAPI'
+3. Create the following folders under LGResearchAPI:
+    app
+    logs
+4. Copy source of LGResearcher to the app folder 
+
+    $source = "<REPLACE_WITH_LGRESEARCHER_ROOT_FOLDER>"
+    $destination = "C:\Services\LGResearchAPI\app" 
+    robocopy $source $destination /E /XD .venv .git node_modules __pycache__ .pytest_cache .mypy_cache .ruff_cache frontend tests /XF *.pyc *.pyo *.db
+
+    In the app folder of service (C:\Services\LGResearchAPI\app) open a terminal:
+        py -m venv .venv
+        .\.venv\Scripts\python.exe -m pip install --upgrade pip
+        .\.venv\Scripts\python -m pip install -r requirements.txt
+5. Copy the .env file from LGResearchRecovery
+
+6. Download WinSW to LGResearchAPI
+
+FAST API Service
+
+Uses Windows Service Wrapper
+https://github.com/winsw/winsw
+
+https://github.com/winsw/winsw/releases/download/v2.12.0/WinSW-x64.exe
+
+7. Rename the WinSW-x64.exe to LGResearchAPI.exe and place in C:\Services\LGResearchAPI folder
+
+
+8. Create a file called LGResearchAPI.xml in the LGResearchAPI folder.  Replace
+the text with that provided below:
+
+IMPORTANT NOTE: If you have a different IP or DNS address for your frontend, make sure it is
+listed under the environment variable LG_RESEARCHER_ALLOWED_ORIGINS in the XML below.
+
+<service>
+  <id>LGResearchAPI</id>
+  <name>LG Research API</name>
+
+  <description>
+    FastAPI service for the LangGraph Researcher application.
+  </description>
+
+  <executable>%BASE%\app\.venv\Scripts\python.exe</executable>
+
+  <arguments>
+    -m uvicorn api.main:app --host 127.0.0.1 --port 8000
+  </arguments>
+
+  <workingdirectory>%BASE%\app</workingdirectory>
+
+  <env name="PYTHONUNBUFFERED" value="1"/>
+  <env name="PYTHONUTF8" value="1"/>
+  <env name="LG_RESEARCHER_ALLOWED_ORIGINS" value="http://localhost:5173,http://127.0.0.1:5173,http://127.0.0.1:8000" />
+  <env name="RESEARCH_RECOVERY_HEALTH_FILE" value="C:\Services\LGResearchRecovery\health\recovery-health.json" />
+
+  <startmode>Automatic</startmode>
+  <delayedAutoStart>true</delayedAutoStart>
+
+  <onfailure action="restart" delay="10 sec"/>
+
+  <stoptimeout>30 sec</stoptimeout>
+
+  <logpath>%BASE%\logs</logpath>
+
+  <log mode="roll-by-size">
+    <sizeThreshold>10240</sizeThreshold>
+    <keepFiles>10</keepFiles>
+  </log>
+</service>
+
+9. Register and start (Admin Terminal):
+# Install the Windows service
+.\LGResearchAPI.exe install
+
+# Start the service
+.\LGResearchAPI.exe start
+
+# Check service status
+.\LGResearchAPI.exe status
+
+
+
+
+
+
+
+Installation Instructions (React Frontend)
+
+Note: Make sure Node and NPM are installed.
+
+1. Navigate to the folder called 'Services' on C:
+2. Create a sub folder called 'LGResearchFrontend'
+3. Navigate to the frontend folder in LGResearcher source.  Run the following commands:
+
+    npm ci
+    npm run build
+4. Download Caddy and copy to LGResearchFrontend and rename it caddy.exe.
+https://caddyserver.com/download
+5. Create a file called 'Caddyfile' with the following contents:
+
+http://localhost:8080 {
+    root * C:/Services/LGResearchFrontend/dist
+
+    encode gzip zstd
+
+    @api {
+        path /api /api/*
+    }
+
+    handle @api {
+        reverse_proxy 127.0.0.1:8000
+    }
+
+    handle {
+        try_files {path} /index.html
+        file_server
+    }
+}
+6. run '.\caddy.exe fmt --overwrite' to format the Caddyfile.  Test Caddy:
+.\caddy.exe validate --config Caddyfile --adapter caddyfile
+
+.\caddy.exe run --config Caddyfile --adapter caddyfile
+
+Navigate to localhost:8080.  Confirm that the site is visible.  Then terminate caddy (CTRL->C)
+
+7. Copy the foldere /frontend/dist from the LGResearcher source to LGResearchFrontend
+8. Create a folder called logs
+9. Create LGResearchFrontend.xml in the LGResearchFrontend folder and add the following:
+
+
+<service>
+  <id>LGResearchFrontend</id>
+  <name>LG Research Frontend</name>
+
+  <description>
+    Caddy web server hosting the LG Researcher frontend.
+  </description>
+
+  <executable>%BASE%\caddy.exe</executable>
+
+  <arguments>
+    run --config "%BASE%\Caddyfile" --adapter caddyfile
+  </arguments>
+
+  <workingdirectory>%BASE%</workingdirectory>
+
+  <startmode>Automatic</startmode>
+  <delayedAutoStart>true</delayedAutoStart>
+
+  <onfailure action="restart" delay="10 sec"/>
+
+  <logpath>%BASE%\logs</logpath>
+
+  <log mode="roll-by-size">
+    <sizeThreshold>10240</sizeThreshold>
+    <keepFiles>10</keepFiles>
+  </log>
+</service>
+
+
+10. Register and start (Admin Terminal):
+# Install the Windows service
+.\LGResearchFrontend.exe install
+
+# Start the service
+.\LGResearchFrontend.exe start
+
+# Check service status
+.\LGResearchFrontend.exe status
+
+
+
+
+
+Initialise Admin account
+
+Navigate to C:\Services\LGResearchRecovery\app
+
+python bootstrap_admin.py
+
+Go to Web UI and use the following credentials to log in:
+
+admin
+admin
+
+
+You are all ready to go.
