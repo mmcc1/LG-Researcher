@@ -323,7 +323,7 @@ listed under the environment variable LG_RESEARCHER_ALLOWED_ORIGINS in the XML b
 
   <env name="PYTHONUNBUFFERED" value="1"/>
   <env name="PYTHONUTF8" value="1"/>
-  <env name="LG_RESEARCHER_ALLOWED_ORIGINS" value="http://localhost:5173,http://127.0.0.1:5173,http://127.0.0.1:8000" />
+  <env name="LG_RESEARCHER_ALLOWED_ORIGINS" value="http://localhost:5173,http://127.0.0.1:5173,http://127.0.0.1:8000,http://localhost:8080,http://127.0.0.1:8080" />
   <env name="RESEARCH_RECOVERY_HEALTH_FILE" value="C:\Services\LGResearchRecovery\health\recovery-health.json" />
 
   <startmode>Automatic</startmode>
@@ -443,7 +443,10 @@ Navigate to localhost:8080.  Confirm that the site is visible.  Then terminate c
 
 
 
+Reports folder
 
+Currently set in the .env file to C:\reports.  If changing anything in a .env file, make sure to copy to 
+LGResearchRecovery, LGResearchWorker and LGResearchAPI and restart the services.
 
 Initialise Admin account
 
