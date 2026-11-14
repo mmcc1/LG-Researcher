@@ -52,6 +52,10 @@ from domain.review import (
     ResearchQuestionReview,
 )
 
+from persistence.research_scope_repository import (
+    ResearchScopeRepository,
+)
+
 
 class ReviewQuestionNode:
 
@@ -162,6 +166,16 @@ class ReviewQuestionNode:
 
             review_repository = (
                 ReviewRepository(db)
+            )
+
+            scope_repository = (
+                ResearchScopeRepository(db)
+            )
+
+            scope_definition = (
+                scope_repository.get(
+                    session_id
+                )
             )
 
             #
@@ -350,6 +364,7 @@ class ReviewQuestionNode:
             valid_finding_ids=(
                 valid_finding_ids
             ),
+            scope_definition=scope_definition,
         )
 
         if execution_guard is not None:

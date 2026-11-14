@@ -557,6 +557,7 @@ class ResearchWorkflowService:
             "session_id": session_id,
             "topic": topic,
             "scope": scope,
+            "scope_definition": None,
             "user_questions": user_questions,
             "resume": resume,
             "resume_phase": None,

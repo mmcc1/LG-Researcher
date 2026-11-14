@@ -54,6 +54,10 @@ from persistence.execution_lease_repository import (
     ExecutionLease,
 )
 
+from persistence.research_scope_repository import (
+    ResearchScopeRepository,
+)
+
 
 class GenerateReportNode:
 
@@ -271,9 +275,19 @@ class GenerateReportNode:
                 ReviewRepository(db)
             )
 
+            scope_repository = (
+                ResearchScopeRepository(db)
+            )
+
             reviews = (
                 review_repository
                 .get_for_session(
+                    session_id
+                )
+            )
+
+            scope_definition = (
+                scope_repository.get(
                     session_id
                 )
             )
@@ -347,6 +361,9 @@ class GenerateReportNode:
                 topic=topic,
                 reviewed_evidence=(
                     reviewed_evidence
+                ),
+                scope_definition=(
+                    scope_definition
                 ),
             )
         )

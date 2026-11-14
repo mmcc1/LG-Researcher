@@ -46,6 +46,10 @@ from persistence.source_repository import (
     SourceRepository,
 )
 
+from persistence.research_scope_repository import (
+    ResearchScopeRepository,
+)
+
 from processing.source_context_builder import (
     SourceContextBuilder,
 )
@@ -139,9 +143,19 @@ class AnalyseSourcesNode:
 
             source_repository = SourceRepository(db)
 
+            scope_repository = (
+                ResearchScopeRepository(db)
+            )
+
             sources = (
                 source_repository.get_for_question(
                     question_id
+                )
+            )
+
+            scope_definition = (
+                scope_repository.get(
+                    session_id
                 )
             )
 
@@ -230,6 +244,7 @@ class AnalyseSourcesNode:
                     source_title=source.title,
                     source_url=source.final_url,
                     source_text=context,
+                    scope_definition=scope_definition,
                 )
 
                 if execution_guard is not None:

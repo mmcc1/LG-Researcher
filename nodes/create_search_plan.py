@@ -30,6 +30,10 @@ from persistence.research_session_repository import (
     ResearchSessionRepository,
 )
 
+from persistence.research_scope_repository import (
+    ResearchScopeRepository,
+)
+
 from persistence.finding_repository import (
     FindingRepository,
 )
@@ -164,6 +168,16 @@ class CreateSearchPlanNode:
             topic = research_session.topic
             scope = research_session.scope
 
+            scope_repository = (
+                ResearchScopeRepository(db)
+            )
+
+            scope_definition = (
+                scope_repository.get(
+                    state["session_id"]
+                )
+            )
+
             #
             # Copy durable attempt values while the
             # SQL session is open.
@@ -218,6 +232,13 @@ class CreateSearchPlanNode:
                 "research scope."
             )
 
+        if scope_definition is not None:
+
+            print(
+                "Search plan includes structured "
+                "research scope definition."
+            )
+
         if instructions:
 
             print(
@@ -245,6 +266,7 @@ class CreateSearchPlanNode:
                 existing_evidence_context=(
                     existing_evidence_context
                 ),
+                scope_definition=scope_definition,
             )
         )
 

@@ -23,7 +23,11 @@ from langchain_core.messages import (
 )
 
 from domain.search import SearchPlan
+from domain.research_scope import (
+    ResearchScopeDefinition,
+)
 from config import settings
+
 
 class SearchPlanner:
 
@@ -49,6 +53,7 @@ class SearchPlanner:
         purpose: str = "initial",
         instructions: str | None = None,
         existing_evidence_context: str | None = None,
+        scope_definition: ResearchScopeDefinition | None = None,
     ) -> SearchPlan:
 
         if purpose == "initial":
@@ -194,10 +199,32 @@ class SearchPlanner:
 
             evidence_text = None
 
+        if scope_definition is None:
+
+            definition_text = (
+                "No structured research scope "
+                "definition has been supplied."
+            )
+
+        else:
+
+            definition_json = (
+                scope_definition.model_dump_json(
+                    indent=2
+                )
+            )
+
+            definition_text = (
+                "Provisional structured research "
+                "scope definition:\n"
+                f"{definition_json}"
+            )
+
         human_content = (
             f"Research topic:\n{topic}\n\n"
             f"Research question:\n{question}\n\n"
             f"{scope_text}\n\n"
+            f"{definition_text}\n\n"
             f"Search purpose:\n{purpose}\n\n"
             f"{purpose_guidance}\n\n"
             f"{instruction_text}"
@@ -233,6 +260,38 @@ class SearchPlanner:
                     "Do not broaden the search beyond the "
                     "scope merely because the overall topic "
                     "or research question is broader. "
+                    "\n\n"
+                    "The structured research scope "
+                    "definition is a provisional "
+                    "interpretation of the research "
+                    "subject, not an authoritative "
+                    "research conclusion. "
+
+                    "Explicit user-defined scope and "
+                    "research questions take precedence "
+                    "over generated scope definitions. "
+
+                    "Use the structured definition to "
+                    "identify relevant terminology, "
+                    "related concepts, distinctions, "
+                    "and evidence requirements. "
+
+                    "Do not treat related concepts as "
+                    "equivalent without supporting "
+                    "evidence. "
+
+                    "When generated inclusions and "
+                    "exclusions conflict, preserve "
+                    "relevant subjects for investigation "
+                    "rather than silently omitting them. "
+
+                    "Do not exclude relevant speculative "
+                    "or disputed material solely because "
+                    "its evidential status is uncertain. "
+
+                    "Search for evidence that can "
+                    "establish, qualify, or challenge "
+                    "such claims. "
                     "\n\n"
                     "Additional research instructions are "
                     "specific to the current search pass. "

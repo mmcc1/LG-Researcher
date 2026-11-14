@@ -85,6 +85,10 @@ from nodes.create_search_plan import (
     CreateSearchPlanNode,
 )
 
+from nodes.define_research_scope import (
+    DefineResearchScopeNode,
+)
+
 from nodes.generate_report import (
     GenerateReportNode,
 )
@@ -158,6 +162,10 @@ from nodes.check_pause import (
 )
 
 from config import settings
+
+from agents.research_scope_agent import (
+    ResearchScopeAgent,
+)
 
 
 def route_pause(
@@ -260,6 +268,21 @@ def create_research_graph(
             context_builder=(
                 source_context_builder
             ),
+        )
+    )
+
+    research_scope_agent = (
+        ResearchScopeAgent(
+            model=models.planner
+        )
+    )
+
+    define_research_scope = (
+        DefineResearchScopeNode(
+            session_factory=(
+                session_factory
+            ),
+            agent=research_scope_agent,
         )
     )
 
@@ -467,6 +490,13 @@ def create_research_graph(
     #
 
     builder.add_node(
+        "define_research_scope",
+        GuardedGraphNode(
+            node=define_research_scope,
+        ),
+    )
+
+    builder.add_node(
         "plan_research",
         GuardedGraphNode(
             node=research_planner,
@@ -653,7 +683,7 @@ def create_research_graph(
         START,
         route_start,
         {
-            "new": "plan_research",
+            "new": "define_research_scope",
             "resume": "select_resume_phase",
         },
     )
@@ -662,7 +692,7 @@ def create_research_graph(
         "select_resume_phase",
         route_resume_phase,
         {
-            "planning": "plan_research",
+            "planning": "define_research_scope",
             "research": "select_question",
             "review": "select_review_question",
             "report": "check_pause_before_report",
@@ -675,6 +705,11 @@ def create_research_graph(
     # Research phase
     # -------------------------------------------------
     #
+
+    builder.add_edge(
+        "define_research_scope",
+        "plan_research",
+    )
 
     builder.add_edge(
         "plan_research",

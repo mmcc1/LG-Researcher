@@ -33,9 +33,11 @@ class DuckDuckGoSearchProvider(SearchProvider):
         self,
         max_attempts: int = 3,
         retry_delay_seconds: float = 2.0,
+        region: str = "us-en",
     ):
         self.max_attempts = max_attempts
         self.retry_delay_seconds = retry_delay_seconds
+        self.region = region
 
     def search(
         self,
@@ -56,6 +58,7 @@ class DuckDuckGoSearchProvider(SearchProvider):
 
                     raw_results = ddgs.text(
                         query,
+                         region=self.region,
                         max_results=max_results,
                     )
 

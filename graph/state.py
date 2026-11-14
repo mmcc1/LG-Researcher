@@ -18,6 +18,9 @@ from typing import NotRequired, TypedDict
 
 from domain.research_plan import ResearchPlan
 from domain.search import SearchPlan, SearchResult
+from domain.research_scope import (
+    ResearchScopeDefinition,
+)
 
 
 class ResearchState(TypedDict):
@@ -27,6 +30,10 @@ class ResearchState(TypedDict):
     topic: str
 
     scope: NotRequired[str | None]
+
+    scope_definition: NotRequired[
+        ResearchScopeDefinition | None
+    ]
     
     user_questions: NotRequired[list[str]]
 

@@ -26,6 +26,7 @@ from sqlalchemy import (
     Boolean,
     Index,
     text,
+    UnicodeText,
 )
 
 from sqlalchemy.orm import (
@@ -96,6 +97,36 @@ class ResearchSession(Base):
     questions: Mapped[list["ResearchQuestion"]] = relationship(
         back_populates="research_session",
         cascade="all, delete-orphan",
+    )
+
+
+class ResearchScopeDefinitionEntity(Base):
+
+    __tablename__ = "research_scope_definitions"
+
+    research_session_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey(
+            "research_sessions.id",
+            ondelete="CASCADE",
+        ),
+        primary_key=True,
+    )
+
+    definition_json: Mapped[str] = mapped_column(
+        UnicodeText,
+        nullable=False,
+    )
+
+    schema_version: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=1,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
     )
 
 

@@ -1231,12 +1231,21 @@ class ResearchJobRepository:
             INNER JOIN dbo.research_sessions AS s
                 ON s.id = j.research_session_id
             WHERE j.research_session_id = :session_id
-              AND j.status = 'claimed'
-              AND (
-                    j.lease_expires_at IS NULL
-                    OR j.lease_expires_at <= SYSUTCDATETIME()
-                  )
-              AND s.status = 'completed'
+                AND (
+                    (
+                        j.status = 'claimed'
+                        AND (
+                            j.lease_expires_at IS NULL
+                            OR j.lease_expires_at <= SYSUTCDATETIME()
+                        )
+                    )
+                    OR (
+                        j.status = 'failed'
+                        AND j.execution_owner IS NULL
+                        AND j.lease_expires_at IS NULL
+                    )
+                )
+                AND s.status = 'completed'
         """)
 
         try:
@@ -1349,12 +1358,21 @@ class ResearchJobRepository:
                 )
                 INNER JOIN dbo.research_sessions AS s
                     ON s.id = j.research_session_id
-                WHERE j.status = 'claimed'
-                  AND (
-                      j.lease_expires_at IS NULL
-                      OR j.lease_expires_at <= SYSUTCDATETIME()
-                  )
-                  AND s.status = 'completed'
+                WHERE (
+                    (
+                        j.status = 'claimed'
+                        AND (
+                            j.lease_expires_at IS NULL
+                            OR j.lease_expires_at <= SYSUTCDATETIME()
+                        )
+                    )
+                    OR (
+                        j.status = 'failed'
+                        AND j.execution_owner IS NULL
+                        AND j.lease_expires_at IS NULL
+                    )
+                )
+                AND s.status = 'completed'
                 ORDER BY j.id
             )
             UPDATE j
@@ -1500,8 +1518,7 @@ class ResearchJobRepository:
                   'researched',
                   'reviewing',
                   'reviewed',
-                  'reporting',
-                  'completed'
+                  'reporting'
               )
               AND (
                 s.execution_owner IS NULL

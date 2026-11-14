@@ -24,6 +24,9 @@ from langchain_core.messages import (
 
 from domain.report import ResearchReport
 from config import settings
+from domain.research_scope import (
+    ResearchScopeDefinition,
+)
 
 class ReportAgent:
 
@@ -53,7 +56,23 @@ class ReportAgent:
         self,
         topic: str,
         reviewed_evidence: str,
+        scope_definition: ResearchScopeDefinition | None = None,
     ) -> ResearchReport:
+
+        if scope_definition is None:
+
+            scope_text = (
+                "No structured research scope "
+                "definition was supplied."
+            )
+
+        else:
+
+            scope_text = (
+                scope_definition.model_dump_json(
+                    indent=2
+                )
+            )
 
         system_prompt = """
 You are a research report writer.
@@ -75,6 +94,47 @@ Do not use external knowledge.
 Do not invent facts.
 Do not introduce factual claims that are unsupported
 by the supplied reviewed material.
+
+RESEARCH SCOPE RULES
+
+A structured research scope may be supplied to provide
+context about the research objective, terminology,
+related concepts, exclusions, ambiguities, and
+evidence requirements.
+
+The structured scope is provisional research context.
+It is not a source of factual evidence.
+
+Use it to maintain consistent terminology and
+appropriate research boundaries throughout the report.
+
+The research topic and supplied reviewed evidence
+remain authoritative for determining which conclusions
+can be reported.
+
+Do not treat related concepts or technologies as
+equivalent merely because they appear in the scope.
+
+Distinguish established capabilities, experimental
+results, theoretical proposals, disputed claims,
+and unsupported assertions according to the
+reviewed evidence.
+
+Do not present theoretical or speculative claims as
+demonstrated capabilities.
+
+Do not discard relevant reviewed evidence solely
+because it conflicts with a generated scope inclusion
+or exclusion.
+
+Do not invent conclusions to satisfy the scope's
+research objectives.
+
+Where the reviewed evidence cannot resolve a scope
+ambiguity, communicate that limitation appropriately.
+
+The structured scope must never be used as a
+substitute for reviewed-claim provenance.
 
 The material has already been evaluated by a Review
 Agent. Preserve its assessments of confidence,
@@ -201,6 +261,11 @@ RESEARCH TOPIC:
 {topic}
 
 
+PROVISIONAL STRUCTURED RESEARCH SCOPE:
+
+{scope_text}
+
+
 BEGIN REVIEWED RESEARCH MATERIAL
 
 {reviewed_evidence}
@@ -210,6 +275,9 @@ END REVIEWED RESEARCH MATERIAL
 
 Produce the research report using only the reviewed
 research material above.
+
+Use the structured scope for terminology and research
+context, not as factual evidence.
 """.strip()
 
         return self.model.invoke(
