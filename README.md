@@ -4,4 +4,6 @@ LG Researcher is a langgraph based LLM agnostic research assistant.  Designed fo
 
 **Installation Instructions**
 
-Can be found in the root folder of the app in a file called 'DeploymentNotes.txt'
+Can be found in the root folder of the app in a file called 'DeploymentNotes.txt'  
+
+![Alt Text](images/lgresearcher.png)
