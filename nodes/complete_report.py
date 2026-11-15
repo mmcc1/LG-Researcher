@@ -50,6 +50,14 @@ from processing.report_text_formatter import (
     ReportTextFormatter,
 )
 
+from processing.report_citation_resolver import (
+    ReportCitationResolver,
+)
+
+from processing.report_citation_registry import (
+    ReportCitationRegistry,
+)
+
 
 class CompleteReportNode:
 
@@ -129,6 +137,7 @@ class CompleteReportNode:
         # Load the validated, persisted report.
         #
 
+       
         with self.session_factory() as db:
 
             report_repository = (
@@ -141,12 +150,45 @@ class CompleteReportNode:
                 )
             )
 
-        if report is None:
+            if report is None:
 
-            raise RuntimeError(
-                "Cannot complete research session "
-                "because no persisted report exists."
+                raise RuntimeError(
+                    "Cannot complete research session "
+                    "because no persisted report exists."
+                )
+
+            reviewed_claim_ids = []
+
+            for section in report.sections:
+
+                reviewed_claim_ids.extend(
+                    section.reviewed_claim_ids
+                )
+
+            citation_resolver = (
+                ReportCitationResolver(
+                    db
+                )
             )
+
+            citation_provenance = (
+                citation_resolver.resolve(
+                    session_id=session_id,
+                    reviewed_claim_ids=reviewed_claim_ids,
+                )
+            )
+
+        citation_registry_builder = (
+            ReportCitationRegistry()
+        )
+
+        citation_registry = (
+            citation_registry_builder.build(
+                report=report,
+                provenance=citation_provenance,
+            )
+        )
+
 
         #
         # Format the persisted report.
@@ -154,7 +196,8 @@ class CompleteReportNode:
 
         report_text = (
             self.report_formatter.format(
-                report
+                report=report,
+                citation_registry=citation_registry,
             )
         )
 

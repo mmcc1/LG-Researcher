@@ -31,7 +31,9 @@ from persistence.database import SessionLocal
 from models.agent_models import AgentModels
 from models.factory import ChatModelFactory
 
-from search.duckduckgo import DuckDuckGoSearchProvider
+from search.search_provider_factory import (
+    SearchProviderFactory,
+)
 from extraction.html import HtmlDocumentExtractor
 from retrieval.http import HttpDocumentRetriever
 from security.url_validator import UrlValidator
@@ -232,8 +234,9 @@ def create_production_worker():
 
     document_extractor = HtmlDocumentExtractor()
 
-    search_provider = DuckDuckGoSearchProvider()
-
+    search_provider = SearchProviderFactory.create(
+        settings=settings.search,
+    )
     # Models
 
     agent_models = AgentModels(

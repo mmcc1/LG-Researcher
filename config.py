@@ -44,6 +44,56 @@ class DatabaseSettings:
     trust_server_certificate: str
 
 
+
+@dataclass(frozen=True)
+class SearchSettings:
+    provider: str
+    langsearch_api_key: str | None
+    langsearch_timeout_seconds: float
+    langsearch_max_attempts: int
+    langsearch_retry_delay_seconds: float
+
+    def __post_init__(self):
+
+        if self.provider not in {
+            "duckduckgo",
+            "langsearch",
+        }:
+
+            raise ValueError(
+                f"Unsupported search provider: {self.provider}"
+            )
+
+        if (
+            self.provider == "langsearch"
+            and not self.langsearch_api_key
+        ):
+
+            raise ValueError(
+                "LANGSEARCH_API_KEY is required "
+                "when SEARCH_PROVIDER=langsearch."
+            )
+
+        if self.langsearch_timeout_seconds <= 0:
+
+            raise ValueError(
+                "LangSearch timeout must be positive."
+            )
+
+        if self.langsearch_max_attempts < 1:
+
+            raise ValueError(
+                "LangSearch max attempts must be at least 1."
+            )
+
+        if self.langsearch_retry_delay_seconds < 0:
+
+            raise ValueError(
+                "LangSearch retry delay cannot be negative."
+            )
+
+
+
 @dataclass(frozen=True)
 class ResearchSettings:
     question_count: int
@@ -111,6 +161,7 @@ class Settings:
     controller_model: ModelSettings
 
     database: DatabaseSettings
+    search: SearchSettings
     report_output_directory: str
     research: ResearchSettings
 
@@ -249,6 +300,36 @@ settings = Settings(
     reviewer_model=create_model_settings("REVIEWER"),
     reporter_model=create_model_settings("REPORTER"),
     controller_model=create_model_settings("CONTROLLER"),
+
+
+    search=SearchSettings(
+        provider=os.getenv(
+            "SEARCH_PROVIDER",
+            "duckduckgo",
+        ).strip().lower(),
+        langsearch_api_key=os.getenv(
+            "LANGSEARCH_API_KEY",
+        ),
+        langsearch_timeout_seconds=float(
+            os.getenv(
+                "LANGSEARCH_TIMEOUT_SECONDS",
+                "30",
+            )
+        ),
+        langsearch_max_attempts=int(
+            os.getenv(
+                "LANGSEARCH_MAX_ATTEMPTS",
+                "3",
+            )
+        ),
+        langsearch_retry_delay_seconds=float(
+            os.getenv(
+                "LANGSEARCH_RETRY_DELAY_SECONDS",
+                "2",
+            )
+        ),
+    ),
+
 
     database=DatabaseSettings(
         server=os.getenv("DB_SERVER", "localhost"),

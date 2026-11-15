@@ -48,21 +48,21 @@ Installation Instructions (recovery_worker.py)
         .\.venv\Scripts\python -m pip install -r requirements.txt
 5. Create a .env file and add the following contents (if using Ollama and Qwen3:8b):
 
+#Use if all providers are the same
+#No need to specify a provider for each agent
 # LLM_PROVIDER=openai
+# LLM_PROVIDER=ollama
+
+
 # OPENAI_API_KEY=your-api-key-here
 
+#Example OpenAI model use if LLM_PROVIDER is used
 # PLANNER_MODEL=gpt-4.1-mini
 # RESEARCHER_MODEL=gpt-4.1-mini
 # SUMMARISER_MODEL=gpt-4.1-mini
 # REVIEWER_MODEL=gpt-4.1
 # REPORTER_MODEL=gpt-4.1
 # CONTROLLER_MODEL=gpt-4.1-mini
-
-PLANNER_PROVIDER=ollama
-PLANNER_MODEL=qwen3:8b
-PLANNER_BASE_URL=http://localhost:11434
-PLANNER_TEMPERATURE=0.2
-PLANNER_TIMEOUT_SECONDS=900
 
 #Example OpenAI usage
 #
@@ -71,6 +71,12 @@ PLANNER_TIMEOUT_SECONDS=900
 # PLANNER_BASE_URL=
 # PLANNER_TEMPERATURE=0.2
 # PLANNER_TIMEOUT_SECONDS=900
+
+PLANNER_PROVIDER=ollama
+PLANNER_MODEL=qwen3:8b
+PLANNER_BASE_URL=http://localhost:11434
+PLANNER_TEMPERATURE=0.2
+PLANNER_TIMEOUT_SECONDS=900
 
 RESEARCHER_PROVIDER=ollama
 RESEARCHER_MODEL=qwen3:8b
@@ -105,13 +111,16 @@ CONTROLLER_TIMEOUT_SECONDS=900
 DB_SERVER=localhost
 DB_PORT=1433
 DB_NAME=Researcher
-DB_USERNAME=lcdev
-DB_PASSWORD=p@ssw0rd11
+DB_USERNAME=<YOUR_USERNAME>
+DB_PASSWORD=<YOUR_PASSWORD>
 DB_DRIVER=ODBC Driver 18 for SQL Server
 DB_TRUST_SERVER_CERTIFICATE=yes
 
 REPORT_OUTPUT_DIRECTORY=C:\reports
 
+#Note: These settings are for quick tests on local models 
+#Increase for more in-depth reports
+#Bigger values work better with advanced models
 RESEARCH_QUESTION_COUNT=2
 SEARCH_MAX_QUERIES=2
 SEARCH_RESULTS_PER_QUERY=3
@@ -123,6 +132,19 @@ SOURCE_CONTEXT_MAX_CHARACTERS=8000
 REPORT_TARGET_WORD_COUNT=1500
 REPORT_MIN_WORD_COUNT=1200
 REPORT_MAX_WORD_COUNT=1800
+
+# Search provider
+#LangSearch free API key here:
+#https://langsearch.com/
+#
+SEARCH_PROVIDER=duckduckgo
+#SEARCH_PROVIDER=langsearch
+
+# LangSearch configuration
+#LANGSEARCH_API_KEY=
+#LANGSEARCH_TIMEOUT_SECONDS=30
+#LANGSEARCH_MAX_ATTEMPTS=3
+#LANGSEARCH_RETRY_DELAY_SECONDS=2
 
 6. Download WinSW to LGResearchRecovery
 

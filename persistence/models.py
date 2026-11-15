@@ -26,7 +26,9 @@ from sqlalchemy import (
     Boolean,
     Index,
     text,
+    Unicode,
     UnicodeText,
+    UniqueConstraint,
 )
 
 from sqlalchemy.orm import (
@@ -48,12 +50,12 @@ class ResearchSession(Base):
     )
 
     topic: Mapped[str] = mapped_column(
-        String(1000),
+        Unicode(1000),
         nullable=False,
     )
 
     scope: Mapped[str | None] = mapped_column(
-        Text,
+        UnicodeText,
         nullable=True,
     )
 
@@ -148,17 +150,17 @@ class ResearchQuestion(Base):
     )
 
     category: Mapped[str] = mapped_column(
-        String(250),
+       Unicode(250),
         nullable=False,
     )
 
     question: Mapped[str] = mapped_column(
-        String(2000),
+        Unicode(2000),
         nullable=False,
     )
 
     rationale: Mapped[str] = mapped_column(
-        Text,
+        UnicodeText,
         nullable=False,
     )
 
@@ -233,7 +235,7 @@ class SearchAttempt(Base):
     )
 
     instructions: Mapped[str | None] = mapped_column(
-        Text,
+        UnicodeText,
         nullable=True,
     )
 
@@ -291,12 +293,12 @@ class WebSearchResult(Base):
     )
 
     query: Mapped[str] = mapped_column(
-        String(2000),
+        Unicode(2000),
         nullable=False,
     )
 
     provider: Mapped[str] = mapped_column(
-        String(100),
+        Unicode(100),
         nullable=False,
     )
 
@@ -306,17 +308,17 @@ class WebSearchResult(Base):
     )
 
     url: Mapped[str] = mapped_column(
-        String(4000),
+        Unicode(4000),
         nullable=False,
     )
 
     title: Mapped[str] = mapped_column(
-        String(2000),
+        Unicode(2000),
         nullable=False,
     )
 
     snippet: Mapped[str] = mapped_column(
-        Text,
+        UnicodeText,
         nullable=False,
     )
 
@@ -351,17 +353,17 @@ class Source(Base):
     )
 
     requested_url: Mapped[str] = mapped_column(
-        String(4000),
+        Unicode(4000),
         nullable=False,
     )
 
     final_url: Mapped[str] = mapped_column(
-        String(4000),
+        Unicode(4000),
         nullable=False,
     )
 
     title: Mapped[str] = mapped_column(
-        String(2000),
+        Unicode(2000),
         nullable=False,
     )
 
@@ -382,12 +384,12 @@ class Source(Base):
     )
 
     raw_content: Mapped[str] = mapped_column(
-        Text,
+        UnicodeText,
         nullable=False,
     )
 
     extracted_text: Mapped[str] = mapped_column(
-        Text,
+        UnicodeText,
         nullable=False,
     )
 
@@ -422,7 +424,7 @@ class SourceSummary(Base):
     )
 
     summary: Mapped[str] = mapped_column(
-        Text,
+        UnicodeText,
         nullable=False,
     )
 
@@ -457,17 +459,17 @@ class Finding(Base):
     )
 
     claim: Mapped[str] = mapped_column(
-        Text,
+        UnicodeText,
         nullable=False,
     )
 
     evidence: Mapped[str] = mapped_column(
-        Text,
+        UnicodeText,
         nullable=False,
     )
 
     relevance: Mapped[str] = mapped_column(
-        Text,
+        UnicodeText,
         nullable=False,
     )
 
@@ -504,7 +506,7 @@ class QuestionReview(Base):
     )
 
     answer: Mapped[str] = mapped_column(
-        Text,
+        UnicodeText,
         nullable=False,
     )
 
@@ -552,7 +554,7 @@ class ReviewedClaimEntity(Base):
     )
 
     claim: Mapped[str] = mapped_column(
-        Text,
+        UnicodeText,
         nullable=False,
     )
 
@@ -636,7 +638,7 @@ class ReviewContradiction(Base):
     )
 
     description: Mapped[str] = mapped_column(
-        Text,
+        UnicodeText,
         nullable=False,
     )
 
@@ -659,8 +661,243 @@ class ReviewEvidenceGap(Base):
     )
 
     description: Mapped[str] = mapped_column(
-        Text,
+        UnicodeText,
         nullable=False,
+    )
+
+
+class ReportPlanEntity(Base):
+
+    __tablename__ = "report_plans"
+
+    id: Mapped[int] = mapped_column(
+        Integer,
+        primary_key=True,
+        autoincrement=True,
+    )
+
+    research_session_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("research_sessions.id"),
+        nullable=False,
+        unique=True,
+    )
+
+    title: Mapped[str] = mapped_column(
+        Unicode(2000),
+        nullable=False,
+    )
+
+    target_word_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+
+    executive_summary_word_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+
+    conclusions_word_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+
+    limitations_word_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+    )
+
+
+class ReportPlannedSectionEntity(Base):
+
+    __tablename__ = "report_planned_sections"
+
+    __table_args__ = (
+        Index(
+            "ux_report_planned_sections_ordinal",
+            "report_plan_id",
+            "ordinal",
+            unique=True,
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(
+        Integer,
+        primary_key=True,
+        autoincrement=True,
+    )
+
+    report_plan_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("report_plans.id"),
+        nullable=False,
+        index=True,
+    )
+
+    ordinal: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+
+    heading: Mapped[str] = mapped_column(
+        Unicode(1000),
+        nullable=False,
+    )
+
+    purpose: Mapped[str] = mapped_column(
+        UnicodeText,
+        nullable=False,
+    )
+
+    target_word_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+
+
+class ReportPlannedSectionClaim(Base):
+
+    __tablename__ = "report_planned_section_claims"
+
+    report_planned_section_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("report_planned_sections.id"),
+        primary_key=True,
+    )
+
+    reviewed_claim_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("reviewed_claims.id"),
+        primary_key=True,
+    )
+
+
+
+class ReportGeneratedSectionEntity(Base):
+
+    __tablename__ = "report_generated_sections"
+
+    report_planned_section_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("report_planned_sections.id"),
+        nullable=False,
+        unique=True,
+    )
+
+    id: Mapped[int] = mapped_column(
+        Integer,
+        primary_key=True,
+        autoincrement=True,
+    )
+
+    heading: Mapped[str] = mapped_column(
+        Unicode(1000),
+        nullable=False,
+    )
+
+    content: Mapped[str] = mapped_column(
+        UnicodeText,
+        nullable=False,
+    )
+
+    actual_word_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+    )
+
+
+class ReportGeneratedSectionClaim(Base):
+
+    __tablename__ = "report_generated_section_claims"
+
+    report_generated_section_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("report_generated_sections.id"),
+        primary_key=True,
+    )
+
+    reviewed_claim_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("reviewed_claims.id"),
+        primary_key=True,
+    )
+
+
+class ReportSynthesisEntity(Base):
+
+    __tablename__ = "report_syntheses"
+
+    id: Mapped[int] = mapped_column(
+        Integer,
+        primary_key=True,
+        autoincrement=True,
+    )
+
+    report_plan_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("report_plans.id"),
+        nullable=False,
+        unique=True,
+    )
+
+    executive_summary: Mapped[str] = mapped_column(
+        UnicodeText,
+        nullable=False,
+    )
+
+    conclusions: Mapped[str] = mapped_column(
+        UnicodeText,
+        nullable=False,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+    )
+
+
+class ReportSynthesisLimitation(Base):
+
+    __tablename__ = "report_synthesis_limitations"
+
+    id: Mapped[int] = mapped_column(
+        Integer,
+        primary_key=True,
+        autoincrement=True,
+    )
+
+    report_synthesis_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("report_syntheses.id"),
+        nullable=False,
+    )
+
+    ordinal: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+
+    description: Mapped[str] = mapped_column(
+        UnicodeText,
+        nullable=False,
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "report_synthesis_id",
+            "ordinal",
+        ),
     )
 
 
@@ -693,17 +930,17 @@ class ResearchReportEntity(Base):
     )
 
     title: Mapped[str] = mapped_column(
-        String(2000),
+        Unicode(2000),
         nullable=False,
     )
 
     executive_summary: Mapped[str] = mapped_column(
-        Text,
+        UnicodeText,
         nullable=False,
     )
 
     conclusions: Mapped[str] = mapped_column(
-        Text,
+        UnicodeText,
         nullable=False,
     )
 
@@ -736,12 +973,12 @@ class ReportSectionEntity(Base):
     )
 
     heading: Mapped[str] = mapped_column(
-        String(1000),
+        Unicode(1000),
         nullable=False,
     )
 
     content: Mapped[str] = mapped_column(
-        Text,
+        UnicodeText,
         nullable=False,
     )
 
@@ -786,7 +1023,7 @@ class ReportLimitation(Base):
     )
 
     description: Mapped[str] = mapped_column(
-        Text,
+        UnicodeText,
         nullable=False,
     )
 
@@ -897,12 +1134,12 @@ class ResearchJob(Base):
     )
 
     topic: Mapped[str] = mapped_column(
-        String(1000),
+        Unicode(1000),
         nullable=False,
     )
 
     scope: Mapped[str | None] = mapped_column(
-        Text,
+        UnicodeText,
         nullable=True,
     )
 
@@ -934,7 +1171,7 @@ class ResearchJob(Base):
     )
 
     last_error: Mapped[str | None] = mapped_column(
-        Text,
+        UnicodeText,
         nullable=True,
     )
 
@@ -973,7 +1210,7 @@ class ResearchJobQuestion(Base):
     )
 
     question: Mapped[str] = mapped_column(
-        String(2000),
+        Unicode(2000),
         nullable=False,
     )
 

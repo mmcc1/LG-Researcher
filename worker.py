@@ -35,8 +35,8 @@ from models.factory import (
     ChatModelFactory,
 )
 
-from search.duckduckgo import (
-    DuckDuckGoSearchProvider,
+from search.search_provider_factory import (
+    SearchProviderFactory,
 )
 
 from extraction.html import (
@@ -73,8 +73,9 @@ def create_workflow_service():
 
     document_extractor = HtmlDocumentExtractor()
 
-    search_provider = DuckDuckGoSearchProvider()
-
+    search_provider = SearchProviderFactory.create(
+        settings=settings.search,
+    )
     agent_models = AgentModels(
 
         planner=ChatModelFactory.create(

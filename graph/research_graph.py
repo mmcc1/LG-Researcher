@@ -35,6 +35,16 @@ from agents.report_agent import (
     ReportAgent,
 )
 
+
+from agents.report_section_agent import (
+    ReportSectionAgent,
+)
+
+from agents.report_synthesis_agent import (
+    ReportSynthesisAgent,
+)
+
+
 from agents.review_agent import (
     ReviewAgent,
 )
@@ -133,6 +143,15 @@ from processing.report_context_builder import (
     ReportContextBuilder,
 )
 
+
+from processing.report_section_context_builder import (
+    ReportSectionContextBuilder,
+)
+
+from processing.report_assembler import (
+    ReportAssembler,
+)
+
 from processing.report_validator import (
     ReportValidator,
 )
@@ -166,6 +185,7 @@ from config import settings
 from agents.research_scope_agent import (
     ResearchScopeAgent,
 )
+
 
 
 def route_pause(
@@ -414,14 +434,39 @@ def create_research_graph(
         )
     )
 
+
+    report_section_agent = (
+        ReportSectionAgent(
+            model=models.reporter
+        )
+    )
+
+    report_synthesis_agent = (
+        ReportSynthesisAgent(
+            model=models.reporter
+        )
+    )
+
+
     report_context_builder = (
         ReportContextBuilder()
     )
+
+
+    report_section_context_builder = (
+        ReportSectionContextBuilder()
+    )
+
+    report_assembler = (
+        ReportAssembler()
+    )
+
 
     report_validator = (
         ReportValidator()
     )
 
+    
     generate_report = (
         GenerateReportNode(
             session_factory=(
@@ -436,8 +481,21 @@ def create_research_graph(
             validator=(
                 report_validator
             ),
+            report_section_agent=(
+                report_section_agent
+            ),
+            report_synthesis_agent=(
+                report_synthesis_agent
+            ),
+            section_context_builder=(
+                report_section_context_builder
+            ),
+            report_assembler=(
+                report_assembler
+            ),
         )
     )
+
 
     complete_report = (
         CompleteReportNode(
