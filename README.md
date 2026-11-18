@@ -8,6 +8,47 @@ Can be found in the root folder of the app in a file called 'DeploymentNotes.txt
 
 ![Alt Text](images/lgresearcher.png)    
 
+**Key Features**
+
+- Multi-agent research architecture
+- Web-based UI with individual user accounts
+- DDGS, LangSearch, Ollama and OpenAI supported
+- Research Planner
+- Research Scope Agent
+- Search Planner
+- Source Summariser
+- Review Agent
+- Report Section Agent
+- Report Synthesis Agent
+- Multi-agent LangGraph workflow
+- Structured agent inputs and outputs
+- Research question selection and processing
+- Iterative processing of multiple questions
+- Accepts a research topic, scope and user-defined questions
+- Generates multiple research questions
+- Assigning question categories and rationales
+- Integration ready (API) and extensible
+- Split large documents into manageable chunks
+- Rank chunks for relevance to a research question
+- Construct bounded context for the summarisation model
+- Generate source summaries
+- Extract structured research findings
+- Store evidence, relevance and confidence information
+- Rather than accepting every generated finding, LGResearcher has a separate review process
+- Evaluating findings against the original research question
+- Assesses evidence sufficiency
+- Records evidence gaps
+- Identifies supporting findings
+- Identifies contradictory findings
+- Executive summary generation
+- Conclusions
+- Report limitations
+- Source and claim provenance
+- Citation registry (including bibliography)
+- Automated recovery of interrupted job
+- Prompt-injection-resistant agent instructions and architecture
+- Administrative audit
+
 **Some useful notes**
 
 This application is still under development.  When a new push occurs to the repo, it is advisable to delete all tables in the DB and start fresh with 'python create_database.py'.  The application offers two primary providers of agents, Ollama (any model) and OpenAI (any model).  These models can be set in the .env file, a sample of which is provided in the 'DeploymentNotes.txt'. There are also two providers of search results DDGS (which can be unreliable and produce garbled reports) and LangSearch (go to langsearch.com to get an API key - its free).  In the .env file, there are settings which govern how many search results to perform and a number of other settings regarding word count.  In the 'DeploymentNotes.txt' file, the default settings are for very quick tests on small local models.  Play around with these values depending on the size of the context window you are targeting.  There is also a lexical text chunker which is useful for smaller models.  Set it to false for larger context windows.  
