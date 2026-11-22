@@ -18,7 +18,10 @@ from search.base import SearchProvider
 from test_search_result_fencing import create_session, expire_lease
 from test_review_completion_fencing import acquire_lease
 from test_review_selection_fencing import set_session_status
-from test_research_graph_integration import cleanup_graph_test_session
+from test_research_graph_integration import (
+    cleanup_graph_test_session,
+    make_scope_definition,
+)
 
 
 TOPIC = "Deterministic graph pause and resume test"
@@ -105,6 +108,12 @@ class PauseAwareModel:
 
         def respond(messages):
             self.calls[name] += 1
+
+            if name == "ResearchScopeDefinition":
+
+                return make_scope_definition(
+                    TOPIC
+                )
 
             if name == "ResearchPlan":
                 return ResearchPlan(
@@ -301,9 +310,12 @@ def main():
         assert [row.status for row in rows] == ["researched", "pending"], rows
         print("TEST 2 - Graph paused after first completed question: PASSED")
 
-        assert model.calls == Counter(
-            {"ResearchPlan": 1, "SearchPlan": 1, "SourceAnalysis": 1}
-        ), model.calls
+        assert model.calls == Counter({
+            "ResearchScopeDefinition": 1,
+            "ResearchPlan": 1,
+            "SearchPlan": 1,
+            "SourceAnalysis": 1,
+        }), model.calls
         assert search.calls == [QUERIES[0]], search.calls
         assert retriever.calls == [URLS[0]], retriever.calls
         assert count_rows("search_attempts", session_id) == 1
@@ -336,9 +348,12 @@ def main():
         ]
         print("TEST 5 - Resume completed remaining question: PASSED")
 
-        assert model.calls == Counter(
-            {"ResearchPlan": 1, "SearchPlan": 2, "SourceAnalysis": 2}
-        ), model.calls
+        assert model.calls == Counter({
+            "ResearchScopeDefinition": 1,
+            "ResearchPlan": 1,
+            "SearchPlan": 2,
+            "SourceAnalysis": 2,
+        }), model.calls
         assert search.calls == list(QUERIES), search.calls
         assert retriever.calls == list(URLS), retriever.calls
         print("TEST 6 - Completed question not repeated: PASSED")

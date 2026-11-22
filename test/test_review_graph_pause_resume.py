@@ -140,7 +140,10 @@ def main():
             model.finding_ids[i] = findings[i].finding_id
 
         assert model.calls == Counter({
-            "ResearchPlan": 1, "SearchPlan": 2, "SourceAnalysis": 2,
+            "ResearchScopeDefinition": 1,
+            "ResearchPlan": 1,
+            "SearchPlan": 2,
+            "SourceAnalysis": 2,
         }), model.calls
         assert search.calls == list(QUERIES), search.calls
         assert retriever.calls == list(URLS), retriever.calls
@@ -199,8 +202,11 @@ def main():
             (questions[i].id, model.finding_ids[i]) for i in range(2)
         ]
         assert model.calls == Counter({
-            "ResearchPlan": 1, "SearchPlan": 2,
-            "SourceAnalysis": 2, "ResearchQuestionReview": 2,
+            "ResearchScopeDefinition": 1,
+            "ResearchPlan": 1,
+            "SearchPlan": 2,
+            "SourceAnalysis": 2,
+            "ResearchQuestionReview": 2,
         }), model.calls
         print("TEST 8 - Reviews and references not duplicated: PASSED")
 

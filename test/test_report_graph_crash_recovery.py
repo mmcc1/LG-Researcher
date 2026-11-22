@@ -24,8 +24,17 @@ from test_report_graph_integration import (
     make_graph,
     acquire_replacement_lease,
     cleanup_report,
+    report_artifact_counts,
+    report_artifact_snapshot,
+    expected_report_artifact_counts,
+    expected_partial_report_artifact_counts,
+    assert_report_artifacts_preserved,
+    expected_reporting_calls,
 )
-from test_report_graph_pause_resume import report_counts
+
+
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 
 class InjectedReportCrash(RuntimeError):
@@ -45,7 +54,8 @@ class CrashOnceReportModel(ReportModel):
 
         self.crash_count = 0
 
-        self.report_attempts = 0
+        self.section_attempts = Counter()
+
 
     def with_structured_output(
         self,
@@ -58,7 +68,7 @@ class CrashOnceReportModel(ReportModel):
             **kwargs,
         )
 
-        if schema.__name__ != "ResearchReport":
+        if schema.__name__ != "ReportSection":
 
             return runnable
 
@@ -66,16 +76,24 @@ class CrashOnceReportModel(ReportModel):
             messages,
         ):
 
-            self.report_attempts += 1
+            ordinal = self.section_ordinal(
+                messages
+            )
 
-            if self.crash_enabled:
+            self.section_attempts[ordinal] += 1
+
+            if (
+                ordinal == 2
+                and self.crash_enabled
+            ):
 
                 self.crash_enabled = False
 
                 self.crash_count += 1
 
                 print(
-                    "Injected worker crash during Report Agent invocation."
+                    "Injected worker crash during "
+                    "second report section generation."
                 )
 
                 raise InjectedReportCrash(
@@ -94,6 +112,14 @@ class CrashOnceReportModel(ReportModel):
 def main():
 
     session_id = None
+
+    temporary_directory = TemporaryDirectory(
+        prefix="lgresearcher-report-test-"
+    )
+
+    output_directory = Path(
+        temporary_directory.name
+    )
 
     print("REPORT GRAPH CRASH RECOVERY")
     print("===========================")
@@ -121,6 +147,12 @@ def main():
             model,
             search,
             retriever,
+            output_directory=output_directory,
+        )
+
+        report_path = (
+            output_directory
+            / f"{session_id}.txt"
         )
 
         research_lease = acquire_lease(
@@ -234,16 +266,36 @@ def main():
             )
 
         assert caught is not None, (
-            "Expected the injected failure to escape graph.invoke."
+            "Expected the injected failure "
+            "to escape graph.invoke."
         )
 
         assert model.crash_count == 1
 
-        assert model.report_attempts == 1
+        assert model.section_attempts == Counter({
+            1: 1,
+            2: 1,
+        }), model.section_attempts
 
-        print("TEST 5 - Worker interrupted during reporting: PASSED")
+        assert model.section_calls == Counter({
+            1: 1,
+        }), model.section_calls
+
+        assert model.calls == (
+            previous_calls + Counter({
+                "ProposedReportPlan": 1,
+                "ReportSection": 1,
+            })
+        ), model.calls
+
+        print(
+            "TEST 5 - Worker interrupted during "
+            "second report section: PASSED"
+        )
 
         assert status(session_id) == "reporting"
+
+        assert not report_path.exists()
 
         with SessionLocal() as db:
 
@@ -256,24 +308,34 @@ def main():
 
         assert persisted is None
 
-        assert report_counts(
+        partial_counts = report_artifact_counts(
             session_id
-        ) == {
-            "reports": 0,
-            "sections": 0,
-            "references": 0,
-            "limitations": 0,
-        }
+        )
 
-        print("TEST 6 - No partial report persisted: PASSED")
+        assert partial_counts == (
+            expected_partial_report_artifact_counts()
+        ), partial_counts
+
+        partial_snapshot = report_artifact_snapshot(
+            session_id
+        )
+
+        print(
+            "TEST 6 - Plan and first section durable; "
+            "interrupted section absent: PASSED"
+        )
 
         replacement_lease = acquire_replacement_lease(
             session_id
         )
 
-        assert replacement_lease.version != report_lease.version
+        assert replacement_lease.version != (
+            report_lease.version
+        )
 
-        print("TEST 7 - Replacement worker prepared: PASSED")
+        print(
+            "TEST 7 - Replacement worker prepared: PASSED"
+        )
 
         invoke(
             graph,
@@ -285,11 +347,36 @@ def main():
 
         assert status(session_id) == "completed"
 
-        assert model.report_attempts == 2
+        assert model.crash_count == 1
 
-        assert model.calls["ResearchReport"] == 1
+        assert model.section_attempts == Counter({
+            1: 1,
+            2: 2,
+        }), model.section_attempts
 
-        print("TEST 8 - Report regenerated and session completed: PASSED")
+        assert model.section_calls == Counter({
+            1: 1,
+            2: 1,
+        }), model.section_calls
+
+        print(
+            "TEST 8 - Only interrupted section "
+            "regenerated: PASSED"
+        )
+
+        final_snapshot = report_artifact_snapshot(
+            session_id
+        )
+
+        assert_report_artifacts_preserved(
+            partial_snapshot,
+            final_snapshot,
+        )
+
+        print(
+            "TEST 9 - Original plan and first section "
+            "preserved unchanged: PASSED"
+        )
 
         with SessionLocal() as db:
 
@@ -302,45 +389,101 @@ def main():
 
         assert recovered_report is not None
 
-        assert recovered_report.title == "Controlled Research Report"
+        assert recovered_report.title == (
+            "Controlled Research Report"
+        )
 
-        assert len(recovered_report.sections) == 1
+        assert len(recovered_report.sections) == 2
 
-        assert recovered_report.sections[0].reviewed_claim_ids == [
-            model.reviewed_claim_id
-        ]
+        for index, section in enumerate(
+            recovered_report.sections
+        ):
+
+            assert section.ordinal == index + 1
+
+            assert section.heading == (
+                model.SECTION_HEADINGS[index]
+            )
+
+            assert section.content == (
+                model.SECTION_CONTENT[index]
+            )
+
+            assert section.reviewed_claim_ids == [
+                model.reviewed_claim_id
+            ]
 
         assert recovered_report.limitations == [
             "The evidence is a deterministic fixture."
         ]
 
-        print("TEST 9 - Recovered report provenance valid: PASSED")
+        print(
+            "TEST 10 - Recovered report content "
+            "and provenance valid: PASSED"
+        )
 
-        assert report_counts(
+        final_counts = report_artifact_counts(
             session_id
-        ) == {
-            "reports": 1,
-            "sections": 1,
-            "references": 1,
-            "limitations": 1,
-        }
+        )
 
-        print("TEST 10 - No duplicate report records: PASSED")
+        assert final_counts == (
+            expected_report_artifact_counts()
+        ), final_counts
 
-        for key, count in previous_calls.items():
+        print(
+            "TEST 11 - No duplicate reporting "
+            "artifacts: PASSED"
+        )
 
-            assert model.calls[key] == count
+        assert model.calls == (
+            previous_calls
+            + expected_reporting_calls()
+        ), model.calls
 
-        assert len(search.calls) == previous_searches
+        assert len(search.calls) == (
+            previous_searches
+        )
 
-        assert len(retriever.calls) == previous_retrievals
+        assert len(retriever.calls) == (
+            previous_retrievals
+        )
 
-        print("TEST 11 - Research and review not repeated: PASSED")
+        print(
+            "TEST 12 - Research, review and completed "
+            "reporting work not repeated: PASSED"
+        )
+
+        assert report_path.is_file()
+
+        report_text = report_path.read_text(
+            encoding="utf-8"
+        )
+
+        assert recovered_report.title in report_text
+
+        for section in recovered_report.sections:
+
+            assert section.heading in report_text
+
+            assert section.content in report_text
+
+        assert "BIBLIOGRAPHY" in report_text
+
+        assert not list(
+            output_directory.glob("*.tmp")
+        )
+
+        print(
+            "TEST 13 - Recovered report published "
+            "successfully: PASSED"
+        )
 
         print()
         print("PASS")
 
     finally:
+
+        temporary_directory.cleanup()
 
         if session_id is not None:
 

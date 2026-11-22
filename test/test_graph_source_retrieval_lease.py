@@ -78,6 +78,40 @@ class FakeRetriever(DocumentRetriever):
         )
 
 
+class StaticDocumentRetriever(DocumentRetriever):
+
+    def __init__(
+        self,
+        content: bytes,
+        content_type: str = "text/html",
+        status_code: int = 200,
+    ):
+
+        self.content = content
+
+        self.content_type = content_type
+
+        self.status_code = status_code
+
+        self.requested_urls = []
+
+    def retrieve(
+        self,
+        url: str,
+    ) -> RetrievedDocument:
+
+        self.requested_urls.append(
+            url
+        )
+
+        return RetrievedDocument(
+            requested_url=url,
+            final_url=url,
+            status_code=self.status_code,
+            content_type=self.content_type,
+            content=self.content,
+        )
+    
 class FailingRetriever(DocumentRetriever):
 
     def retrieve(
@@ -241,6 +275,44 @@ def cleanup_sources(
         )
 
         db.commit()
+
+def expect_unusable_document_rejection(
+    state,
+    lease,
+    retriever,
+):
+
+    session_id = state[
+        "session_id"
+    ]
+
+    before = get_sources(
+        session_id
+    )
+
+    assert not before, (
+        "Document rejection test requires "
+        "a session without persisted sources."
+    )
+
+    graph = create_graph(
+        retriever
+    )
+
+    invoke_graph(
+        graph,
+        state,
+        lease,
+    )
+
+    assert retriever.requested_urls, (
+        "No document retrieval was attempted."
+    )
+
+    assert get_sources(session_id) == before, (
+        "Unusable document retrieval "
+        "changed persisted sources."
+    )
 
 
 def main():
@@ -470,9 +542,87 @@ def main():
             "TEST 7 - Download failure handled: PASSED"
         )
 
-        # The second session can subsequently
-        # retrieve sources successfully.
+        
 
+        expect_unusable_document_rejection(
+            state=state_b,
+            lease=lease_b,
+            retriever=StaticDocumentRetriever(
+                content=b"",
+                status_code=202,
+            ),
+        )
+
+        print(
+            "Empty HTTP 202 document rejected: PASSED"
+        )
+
+        expect_unusable_document_rejection(
+            state=state_b,
+            lease=lease_b,
+            retriever=StaticDocumentRetriever(
+                content=b"",
+                status_code=200,
+            ),
+        )
+
+        print(
+            "Empty HTTP 200 document rejected: PASSED"
+        )
+
+        expect_unusable_document_rejection(
+            state=state_b,
+            lease=lease_b,
+            retriever=StaticDocumentRetriever(
+                content=(
+                    b"<html>"
+                    b"<head></head>"
+                    b"<body></body>"
+                    b"</html>"
+                ),
+            ),
+        )
+
+        print(
+            "HTML without extractable text rejected: PASSED"
+        )
+
+        expect_unusable_document_rejection(
+            state=state_b,
+            lease=lease_b,
+            retriever=StaticDocumentRetriever(
+                content=b" \t\r\n ",
+                content_type="text/plain",
+            ),
+        )
+
+        print(
+            "Whitespace-only document rejected: PASSED"
+        )
+
+        expect_unusable_document_rejection(
+            state=state_b,
+            lease=lease_b,
+            retriever=StaticDocumentRetriever(
+                content=(
+                    b"<html>"
+                    b"<body>"
+                    b"<script>var value = 123;</script>"
+                    b"<style>body { color: red; }</style>"
+                    b"</body>"
+                    b"</html>"
+                ),
+            ),
+        )
+
+        print(
+            "Document containing only scripts "
+            "and styles rejected: PASSED"
+        )
+
+        # The second session can subsequently
+                # retrieve sources successfully.
+        
         invoke_graph(
             graph,
             state_b,
@@ -487,6 +637,59 @@ def main():
 
         print(
             "TEST 8 - Recovery after download failure: PASSED"
+        )
+
+        
+
+        cleanup_sources(
+            [session_b]
+        )
+
+        untitled_retriever = (
+            StaticDocumentRetriever(
+                content=(
+                    b"<html>"
+                    b"<body>"
+                    b"<p>Valid evidence without a title.</p>"
+                    b"</body>"
+                    b"</html>"
+                ),
+            )
+        )
+
+        untitled_graph = create_graph(
+            untitled_retriever
+        )
+
+        invoke_graph(
+            untitled_graph,
+            state_b,
+            lease_b,
+        )
+
+        sources = get_sources(
+            session_b
+        )
+
+        assert sources
+
+        assert len(sources) == len(
+            make_results()
+        )
+
+        assert all(
+            not source[3]
+            for source in sources
+        )
+
+        assert all(
+            "Valid evidence without a title."
+            in source[4]
+            for source in sources
+        )
+
+        print(
+            "Valid untitled documents persisted: PASSED"
         )
 
         print()

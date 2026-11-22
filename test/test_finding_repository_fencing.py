@@ -74,7 +74,13 @@ def make_session():
         return record.id
 
 
-def make_question_and_source(session_id):
+def make_question_and_source(
+    session_id,
+    extracted_text="Test content",
+    raw_content="<p>Test content</p>",
+    status_code=200,
+    title="Test source",
+):
 
     now = utc_now()
 
@@ -100,12 +106,12 @@ def make_question_and_source(session_id):
             research_question_id=question_id,
             requested_url="https://example.com/test",
             final_url="https://example.com/test",
-            title="Test source",
+            title=title,
             content_type="text/html",
-            status_code=200,
+            status_code=status_code,
             content_hash=uuid4().hex,
-            raw_content="<p>Test content</p>",
-            extracted_text="Test content",
+            raw_content=raw_content,
+            extracted_text=extracted_text,
             created_at=now,
         )
 
@@ -147,9 +153,12 @@ def expect_rejection(
     question_id,
     lease,
     exception_type,
+    expected_message=None,
 ):
 
-    before = count_analysis(source_id)
+    before = count_analysis(
+        source_id
+    )
 
     with SessionLocal() as db:
 
@@ -162,9 +171,13 @@ def expect_rejection(
                 lease=lease,
             )
 
-        except exception_type:
+        except exception_type as exc:
 
-            pass
+            if expected_message is not None:
+
+                assert expected_message in str(exc), (
+                    f"Unexpected rejection reason: {exc}"
+                )
 
         else:
 
@@ -172,7 +185,9 @@ def expect_rejection(
                 "Analysis was unexpectedly saved."
             )
 
-    after = count_analysis(source_id)
+    after = count_analysis(
+        source_id
+    )
 
     assert after == before, (
         f"Analysis records changed: {before} -> {after}"
@@ -352,13 +367,9 @@ def main():
 
         expect_rejection(
             source_b,
-            question_b,
-            lease_a,
+            question_a,
+            replacement_b,
             ValueError,
-        )
-
-        print(
-            "TEST 5 - Cross-session source rejected: PASSED"
         )
 
         print(
@@ -432,6 +443,126 @@ def main():
 
         print(
             "TEST 8 - Valid write after rollback: PASSED"
+        )
+
+        invalid_source_cases = [
+            (
+                "Historical empty HTTP 202 source",
+                "",
+                "",
+                202,
+            ),
+            (
+                "Historical whitespace-only source",
+                " \t\r\n ",
+                " \t\r\n ",
+                200,
+            ),
+            (
+                "Historical empty extraction",
+                "",
+                "<html><body></body></html>",
+                200,
+            ),
+        ]
+
+        for (
+            description,
+            extracted_text,
+            raw_content,
+            status_code,
+        ) in invalid_source_cases:
+
+            invalid_session = make_session()
+
+            session_ids.append(
+                invalid_session
+            )
+
+            (
+                invalid_question,
+                invalid_source,
+            ) = make_question_and_source(
+                session_id=invalid_session,
+                extracted_text=extracted_text,
+                raw_content=raw_content,
+                status_code=status_code,
+                title="",
+            )
+
+            with SessionLocal() as db:
+
+                invalid_source_lease = (
+                    ExecutionLeaseRepository(db).acquire(
+                        invalid_session,
+                        duration_seconds=120,
+                    )
+                )
+
+            assert invalid_source_lease is not None
+
+            assert count_analysis(
+                invalid_source
+            ) == (0, 0)
+
+            expect_rejection(
+                source_id=invalid_source,
+                question_id=invalid_question,
+                lease=invalid_source_lease,
+                exception_type=ValueError,
+                expected_message="no usable research text",
+            )
+
+            assert count_analysis(
+                invalid_source
+            ) == (0, 0)
+
+            print(
+                f"{description} rejected: PASSED"
+            )
+
+        untitled_session = make_session()
+
+        session_ids.append(
+            untitled_session
+        )
+
+        (
+            untitled_question,
+            untitled_source,
+        ) = make_question_and_source(
+            session_id=untitled_session,
+            extracted_text="Valid research evidence.",
+            raw_content="<p>Valid research evidence.</p>",
+            title="",
+        )
+
+        with SessionLocal() as db:
+
+            untitled_lease = (
+                ExecutionLeaseRepository(db).acquire(
+                    untitled_session,
+                    duration_seconds=120,
+                )
+            )
+
+        assert untitled_lease is not None
+
+        with SessionLocal() as db:
+
+            FindingRepository(db).save_analysis(
+                source_id=untitled_source,
+                question_id=untitled_question,
+                analysis=make_analysis(),
+                lease=untitled_lease,
+            )
+
+        assert count_analysis(
+            untitled_source
+        ) == (1, 2)
+
+        print(
+            "Valid untitled source analysis persisted: PASSED"
         )
 
         print()

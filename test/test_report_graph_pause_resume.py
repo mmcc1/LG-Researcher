@@ -31,7 +31,14 @@ from test_report_graph_integration import (
     make_graph,
     acquire_replacement_lease,
     cleanup_report,
+    report_artifact_counts,
+    report_artifact_snapshot,
+    expected_report_artifact_counts,
+    expected_reporting_calls,
 )
+
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 
 class PausingReportModel(ReportModel):
@@ -47,6 +54,7 @@ class PausingReportModel(ReportModel):
 
         self.pause_injected = False
 
+
     def with_structured_output(
         self,
         schema,
@@ -58,7 +66,7 @@ class PausingReportModel(ReportModel):
             **kwargs,
         )
 
-        if schema.__name__ != "ResearchReport":
+        if schema.__name__ != "ReportSynthesis":
 
             return runnable
 
@@ -66,7 +74,7 @@ class PausingReportModel(ReportModel):
             messages,
         ):
 
-            report = runnable.invoke(
+            synthesis = runnable.invoke(
                 messages
             )
 
@@ -80,10 +88,11 @@ class PausingReportModel(ReportModel):
                 self.pause_injected = True
 
                 print(
-                    "Injected pause during Report Agent invocation."
+                    "Injected pause during "
+                    "report synthesis invocation."
                 )
 
-            return report
+            return synthesis
 
         return RunnableLambda(
             respond
@@ -177,6 +186,14 @@ def main():
 
         session_id = create_session()
 
+        temporary_directory = TemporaryDirectory(
+            prefix="lgresearcher-report-test-"
+        )
+
+        output_directory = Path(
+            temporary_directory.name
+        )
+
         print(
             f"Disposable session: {session_id}"
         )
@@ -198,6 +215,12 @@ def main():
             model,
             search,
             retriever,
+            output_directory=output_directory,
+        )
+
+        report_path = (
+            output_directory
+            / f"{session_id}.txt"
         )
 
         research_lease = acquire_lease(
@@ -315,7 +338,20 @@ def main():
 
         assert status(session_id) == "reporting"
 
-        print("TEST 5 - Paused after report persistence: PASSED")
+        print(
+            "TEST 5 - Pause honoured at report "
+            "graph boundary: PASSED"
+        )
+
+        assert not report_path.exists(), (
+            "Report was published despite "
+            "the durable pause request."
+        )
+
+        print(
+            "TEST 6 - Report publication "
+            "prevented while paused: PASSED"
+        )
 
         with SessionLocal() as db:
 
@@ -328,22 +364,83 @@ def main():
 
         assert original_report is not None
 
-        assert original_report.sections[0].reviewed_claim_ids == [
-            model.reviewed_claim_id
+        assert original_report.title == (
+            "Controlled Research Report"
+        )
+
+        assert len(
+            original_report.sections
+        ) == 2
+
+        for index, section in enumerate(
+            original_report.sections
+        ):
+
+            assert section.ordinal == index + 1
+
+            assert section.heading == (
+                model.SECTION_HEADINGS[index]
+            )
+
+            assert section.content == (
+                model.SECTION_CONTENT[index]
+            )
+
+            assert section.reviewed_claim_ids == [
+                model.reviewed_claim_id
+            ]
+
+        assert original_report.limitations == [
+            "The evidence is a deterministic fixture."
         ]
 
-        assert report_counts(
+        print(
+            "TEST 7 - Final report and provenance "
+            "persisted before pause: PASSED"
+        )
+
+        paused_counts = report_artifact_counts(
             session_id
-        ) == {
-            "reports": 1,
-            "sections": 1,
-            "references": 1,
-            "limitations": 1,
-        }
+        )
 
-        assert model.calls["ResearchReport"] == 1
+        assert paused_counts == (
+            expected_report_artifact_counts()
+        ), paused_counts
 
-        print("TEST 6 - Report persisted before pause: PASSED")
+        assert model.calls == (
+            previous_calls
+            + expected_reporting_calls()
+        ), model.calls
+
+        assert model.section_calls == Counter({
+            1: 1,
+            2: 1,
+        }), model.section_calls
+
+        paused_snapshot = report_artifact_snapshot(
+            session_id
+        )
+
+        paused_model_calls = Counter(
+            model.calls
+        )
+
+        paused_section_calls = Counter(
+            model.section_calls
+        )
+
+        paused_search_calls = list(
+            search.calls
+        )
+
+        paused_retrieval_calls = list(
+            retriever.calls
+        )
+
+        print(
+            "TEST 8 - All reporting artifacts "
+            "durable before resume: PASSED"
+        )
 
         set_pause(
             session_id,
@@ -354,9 +451,13 @@ def main():
             session_id
         )
 
-        assert replacement_lease.version != report_lease.version
+        assert replacement_lease.version != (
+            report_lease.version
+        )
 
-        print("TEST 7 - Replacement worker prepared: PASSED")
+        print(
+            "TEST 9 - Replacement worker prepared: PASSED"
+        )
 
         resumed_result = invoke(
             graph,
@@ -373,7 +474,10 @@ def main():
 
         assert status(session_id) == "completed"
 
-        print("TEST 8 - Report recovery completed session: PASSED")
+        print(
+            "TEST 10 - Report recovery "
+            "completed session: PASSED"
+        )
 
         with SessionLocal() as db:
 
@@ -386,39 +490,116 @@ def main():
 
         assert final_report is not None
 
-        assert final_report.id == original_report.id
-
-        assert final_report.sections[0].id == (
-            original_report.sections[0].id
+        assert final_report.id == (
+            original_report.id
         )
 
-        assert report_counts(
+        assert len(
+            final_report.sections
+        ) == 2
+
+        for original_section, final_section in zip(
+            original_report.sections,
+            final_report.sections,
+        ):
+
+            assert final_section.id == (
+                original_section.id
+            )
+
+            assert final_section.heading == (
+                original_section.heading
+            )
+
+            assert final_section.content == (
+                original_section.content
+            )
+
+            assert final_section.reviewed_claim_ids == (
+                original_section.reviewed_claim_ids
+            )
+
+        final_snapshot = report_artifact_snapshot(
             session_id
-        ) == {
-            "reports": 1,
-            "sections": 1,
-            "references": 1,
-            "limitations": 1,
-        }
+        )
 
-        assert model.calls["ResearchReport"] == 1
+        assert final_snapshot == paused_snapshot, (
+            "Reporting artifacts changed "
+            "during pause recovery."
+        )
 
-        print("TEST 9 - Existing report reused without duplication: PASSED")
+        final_counts = report_artifact_counts(
+            session_id
+        )
 
-        for key, count in previous_calls.items():
+        assert final_counts == paused_counts
 
-            assert model.calls[key] == count
+        print(
+            "TEST 11 - Every original reporting "
+            "artifact preserved unchanged: PASSED"
+        )
 
-        assert len(search.calls) == previous_searches
+        assert model.calls == paused_model_calls
 
-        assert len(retriever.calls) == previous_retrievals
+        assert model.section_calls == (
+            paused_section_calls
+        )
 
-        print("TEST 10 - Research and review not repeated: PASSED")
+        print(
+            "TEST 12 - No model inference "
+            "repeated after resume: PASSED"
+        )
+
+        assert search.calls == paused_search_calls
+
+        assert retriever.calls == (
+            paused_retrieval_calls
+        )
+
+        assert len(search.calls) == (
+            previous_searches
+        )
+
+        assert len(retriever.calls) == (
+            previous_retrievals
+        )
+
+        print(
+            "TEST 13 - Research and document "
+            "retrieval not repeated: PASSED"
+        )
+
+        assert report_path.is_file()
+
+        report_text = report_path.read_text(
+            encoding="utf-8"
+        )
+
+        assert final_report.title in report_text
+
+        for section in final_report.sections:
+
+            assert section.heading in report_text
+
+            assert section.content in report_text
+
+        assert "BIBLIOGRAPHY" in report_text
+
+        assert not list(
+            output_directory.glob("*.tmp")
+        )
+
+        print(
+            "TEST 14 - Report publication "
+            "completed after resume: PASSED"
+        )
 
         print()
         print("PASS")
 
     finally:
+
+        temporary_directory.cleanup()
 
         if session_id is not None:
 

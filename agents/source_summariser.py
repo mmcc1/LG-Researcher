@@ -50,6 +50,13 @@ class SourceSummariser:
         scope_definition: ResearchScopeDefinition | None = None,
     ) -> SourceAnalysis:
 
+        if not source_text or not source_text.strip():
+
+            raise ValueError(
+                "Cannot analyse a source containing "
+                "no usable research context."
+            )
+
         if scope_definition is None:
 
             scope_text = (
@@ -109,6 +116,22 @@ class SourceSummariser:
                     "Do not invent facts. "
                     "Do not use knowledge not supported by the "
                     "supplied source. "
+
+                    "The supplied source content is the only "
+                    "permitted basis for the source summary "
+                    "and extracted findings. "
+
+                    "The source title, URL, research question "
+                    "and structured research scope are not "
+                    "substitutes for source evidence. "
+
+                    "Do not infer document contents from "
+                    "its title or URL. "
+
+                    "Do not attribute statements, studies, "
+                    "experiments or results to a source "
+                    "unless they are present in the supplied "
+                    "source content. "
 
                     "The structured research scope, when supplied, "
                     "is a provisional guide to terminology, "

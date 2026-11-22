@@ -33,19 +33,25 @@ from test_search_result_fencing import (
 def make_document(
     url: str,
     content: str = "Test source content.",
+    title: str = "Test Source",
+    extracted_text: str | None = None,
 ) -> SourceDocument:
+
+    if extracted_text is None:
+
+        extracted_text = content
 
     return SourceDocument(
         requested_url=url,
         final_url=url,
-        title="Test Source",
+        title=title,
         content_type="text/html",
         status_code=200,
         content_hash=sha256(
             content.encode("utf-8")
         ).hexdigest(),
         raw_content=content,
-        extracted_text=content,
+        extracted_text=extracted_text,
     )
 
 
@@ -62,6 +68,8 @@ def get_sources(
                 Source.requested_url,
                 Source.content_hash,
                 Source.raw_content,
+                Source.extracted_text,
+                Source.title,
             )
             .where(
                 Source.research_session_id
@@ -395,6 +403,119 @@ def main():
 
         print(
             "TEST 9 - Valid write after rollback: PASSED"
+        )
+
+        print()
+
+        invalid_documents = (
+            (
+                "Empty source",
+                make_document(
+                    url=(
+                        "https://example.com/"
+                        f"empty-{uuid4()}"
+                    ),
+                    content="",
+                ),
+            ),
+            (
+                "Whitespace-only source",
+                make_document(
+                    url=(
+                        "https://example.com/"
+                        f"whitespace-{uuid4()}"
+                    ),
+                    content=" \t\r\n ",
+                ),
+            ),
+            (
+                "Non-empty raw content without extracted text",
+                make_document(
+                    url=(
+                        "https://example.com/"
+                        f"empty-extraction-{uuid4()}"
+                    ),
+                    content="<html><body></body></html>",
+                    extracted_text="",
+                ),
+            ),
+        )
+
+        for description, document in invalid_documents:
+
+            expect_rejection(
+                session_b,
+                question_b,
+                document,
+                replacement_lease_b,
+                ValueError,
+            )
+
+            print(
+                f"{description} rejected: PASSED"
+            )
+
+        invalid_retry = make_document(
+            url=document_b.requested_url,
+            content=document_b.raw_content,
+            title=document_b.title,
+            extracted_text="",
+        )
+
+        expect_rejection(
+            session_b,
+            question_b,
+            invalid_retry,
+            replacement_lease_b,
+            ValueError,
+        )
+
+        print(
+            "Invalid duplicate URL rejected: PASSED"
+        )
+
+        untitled_document = make_document(
+            url=(
+                "https://example.com/"
+                f"untitled-{uuid4()}"
+            ),
+            content="Valid research evidence.",
+            title="",
+        )
+
+        before = get_sources(
+            session_b
+        )
+
+        untitled_id = save_document(
+            session_b,
+            question_b,
+            untitled_document,
+            replacement_lease_b,
+        )
+
+        after = get_sources(
+            session_b
+        )
+
+        assert untitled_id is not None
+
+        assert len(after) == len(before) + 1
+
+        persisted_source = next(
+            source
+            for source in after
+            if source[0] == untitled_id
+        )
+
+        assert persisted_source[5] == (
+            "Valid research evidence."
+        )
+
+        assert persisted_source[6] == ""
+
+        print(
+            "Valid untitled source persisted: PASSED"
         )
 
         print()

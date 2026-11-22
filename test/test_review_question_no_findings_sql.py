@@ -26,25 +26,21 @@ from persistence.review_repository import (
 )
 
 
-TEST_DATABASE = "LGResearcher_Test"
+TEST_DATABASE = "Researcher"
 
 
 @pytest.fixture
 def test_environment():
 
-    test_url = engine.url.set(
-        database=TEST_DATABASE
-    )
-
-    if test_url.database != TEST_DATABASE:
+    if engine.url.database != TEST_DATABASE:
 
         raise RuntimeError(
-            "Integration tests must use "
-            "LGResearcher_Test."
+            "Integration test requires the "
+            "Researcher development database."
         )
 
     test_engine = create_engine(
-        test_url,
+        engine.url,
         echo=False,
     )
 
@@ -319,8 +315,8 @@ def test_no_findings_persisted_and_fenced(
 
             assert persisted_review.evidence_gaps == [
                 (
-                    "No research findings were available "
-                    "for this question."
+                    "No usable research findings were "
+                    "available for this question."
                 )
             ]
 

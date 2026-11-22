@@ -57,12 +57,16 @@ def make_analysis():
 def make_database(
     ownership_valid=True,
     existing_analysis=None,
+    extracted_text="Valid source evidence.",
 ):
 
     db = Mock()
 
     ownership_row = (
-        SimpleNamespace(id=100)
+        SimpleNamespace(
+            id=100,
+            extracted_text=extracted_text,
+        )
         if ownership_valid
         else None
     )
@@ -276,5 +280,98 @@ def test_database_failure_rolls_back(
     assert db.add.call_count == 3
 
     db.commit.assert_called_once()
+
+    db.rollback.assert_called_once()
+
+
+@pytest.mark.parametrize(
+    "extracted_text",
+    [
+        None,
+        "",
+        " ",
+        "\t\r\n ",
+    ],
+)
+def test_unusable_source_prevents_analysis_persistence(
+    fence_patch,
+    extracted_text,
+):
+
+    db = make_database(
+        extracted_text=extracted_text,
+    )
+
+    repository = FindingRepository(db)
+
+    lease = make_lease()
+
+    with pytest.raises(
+        ValueError,
+        match="no usable research text",
+    ):
+
+        repository.save_analysis(
+            source_id=100,
+            question_id=10,
+            analysis=make_analysis(),
+            lease=lease,
+        )
+
+    fence_patch.return_value.fence.assert_called_once_with(
+        lease
+    )
+
+    db.execute.assert_called_once()
+
+    db.query.assert_not_called()
+
+    db.add.assert_not_called()
+
+    db.commit.assert_not_called()
+
+    db.rollback.assert_called_once()
+    
+
+def test_existing_invalid_analysis_cannot_bypass_validation(
+    fence_patch,
+):
+
+    existing_summary = SimpleNamespace(
+        id=50,
+        source_id=100,
+        research_question_id=10,
+    )
+
+    db = make_database(
+        existing_analysis=existing_summary,
+        extracted_text="",
+    )
+
+    repository = FindingRepository(db)
+
+    lease = make_lease()
+
+    with pytest.raises(
+        ValueError,
+        match="no usable research text",
+    ):
+
+        repository.save_analysis(
+            source_id=100,
+            question_id=10,
+            analysis=make_analysis(),
+            lease=lease,
+        )
+
+    fence_patch.return_value.fence.assert_called_once_with(
+        lease
+    )
+
+    db.query.assert_not_called()
+
+    db.add.assert_not_called()
+
+    db.commit.assert_not_called()
 
     db.rollback.assert_called_once()

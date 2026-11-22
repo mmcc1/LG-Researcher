@@ -41,7 +41,10 @@ from persistence.execution_lease_repository import (
     ExecutionLeaseRepository,
 )
 
-from persistence.models import Finding
+from persistence.models import (
+    Finding,
+    Source,
+)
 
 
 class ReviewRepository:
@@ -84,6 +87,11 @@ class ReviewRepository:
         self._validate_finding_references(
             review=review,
             valid_finding_ids=valid_finding_ids,
+        )
+
+        self._validate_evidence_sources(
+            question_id=question_id,
+            finding_ids=valid_finding_ids,
         )
 
         question_review = QuestionReview(
@@ -232,6 +240,7 @@ class ReviewRepository:
 
             return None
 
+
         #
         # Load the persisted review for the
         # research question.
@@ -249,6 +258,38 @@ class ReviewRepository:
         if question_review is None:
 
             return None
+
+        research_question = self.db.get(
+            ResearchQuestion,
+            question_id,
+        )
+
+        if research_question is None:
+
+            return None
+
+        #
+        # Load the persisted review for the
+        # research question.
+        #
+
+        question_review = (
+            self.db.query(QuestionReview)
+            .filter(
+                QuestionReview.research_question_id
+                == question_id
+            )
+            .first()
+        )
+
+        if question_review is None:
+
+            return None
+
+        self._validate_persisted_review_evidence(
+            question_id=question_id,
+            review_id=question_review.id,
+        )
 
         #
         # Reconstruct the reviewed claims.
@@ -445,6 +486,193 @@ class ReviewRepository:
 
         return reviews
 
+
+    def _validate_persisted_review_evidence(
+        self,
+        question_id: int,
+        review_id: int,
+    ) -> None:
+
+        claim_rows = (
+            self.db.query(
+                ReviewedClaimEntity.id
+            )
+            .filter(
+                ReviewedClaimEntity.question_review_id
+                == review_id
+            )
+            .all()
+        )
+
+        finding_ids = set()
+
+        for claim_row in claim_rows:
+
+            claim_id = claim_row[0]
+
+            supporting_rows = (
+                self.db.query(
+                    ReviewedClaimSupport.finding_id
+                )
+                .filter(
+                    ReviewedClaimSupport.reviewed_claim_id
+                    == claim_id
+                )
+                .all()
+            )
+
+            contradicting_rows = (
+                self.db.query(
+                    ReviewedClaimContradiction.finding_id
+                )
+                .filter(
+                    ReviewedClaimContradiction.reviewed_claim_id
+                    == claim_id
+                )
+                .all()
+            )
+
+            supporting_ids = {
+                row[0]
+                for row in supporting_rows
+            }
+
+            contradicting_ids = {
+                row[0]
+                for row in contradicting_rows
+            }
+
+            overlapping_ids = (
+                supporting_ids
+                & contradicting_ids
+            )
+
+            if overlapping_ids:
+
+                raise ValueError(
+                    f"Reviewed claim {claim_id} contains "
+                    "finding references that are both "
+                    "supporting and contradicting: "
+                    f"{sorted(overlapping_ids)}"
+                )
+
+            finding_ids.update(
+                supporting_ids
+            )
+
+            finding_ids.update(
+                contradicting_ids
+            )
+
+        self._validate_evidence_sources(
+            question_id=question_id,
+            finding_ids=finding_ids,
+        )
+
+
+    def _validate_evidence_sources(
+        self,
+        question_id: int,
+        finding_ids: set[int],
+    ) -> None:
+
+        if not finding_ids:
+
+            return
+
+        question = self.db.get(
+            ResearchQuestion,
+            question_id,
+        )
+
+        if question is None:
+
+            raise ValueError(
+                "Research question does not exist: "
+                f"{question_id}"
+            )
+
+        rows = (
+            self.db.query(
+                Finding.id,
+                Finding.research_question_id,
+                Source.id,
+                Source.research_question_id,
+                Source.research_session_id,
+                Source.extracted_text,
+            )
+            .outerjoin(
+                Source,
+                Finding.source_id == Source.id,
+            )
+            .filter(
+                Finding.research_question_id
+                == question_id
+            )
+            .all()
+        )
+
+        validated_ids = set()
+
+        for (
+            finding_id,
+            finding_question_id,
+            source_id,
+            source_question_id,
+            source_session_id,
+            source_text,
+        ) in rows:
+
+            if finding_id not in finding_ids:
+
+                continue
+
+            if source_id is None:
+
+                raise ValueError(
+                    f"Finding {finding_id} references "
+                    "a missing source."
+                )
+
+            if (
+                finding_question_id != question_id
+                or source_question_id != question_id
+                or source_session_id
+                != question.research_session_id
+            ):
+
+                raise ValueError(
+                    f"Finding {finding_id} references "
+                    "a source outside the current "
+                    "research question."
+                )
+
+            if not source_text or not source_text.strip():
+
+                raise ValueError(
+                    f"Finding {finding_id} references "
+                    "a source containing no usable "
+                    f"research text: {source_id}"
+                )
+
+            validated_ids.add(
+                finding_id
+            )
+
+        missing_ids = (
+            finding_ids
+            - validated_ids
+        )
+
+        if missing_ids:
+
+            raise ValueError(
+                "Review evidence contains missing "
+                "findings or findings belonging to "
+                "another research question: "
+                f"{sorted(missing_ids)}"
+            )
+
     def _validate_finding_references(
         self,
         review: ResearchQuestionReview,
@@ -623,6 +851,11 @@ class ReviewRepository:
                         "unexpected question status."
                     )
 
+                self._validate_persisted_review_evidence(
+                    question_id=question_id,
+                    review_id=existing.id,
+                )
+
                 review_id = existing.id
 
             else:
@@ -651,41 +884,14 @@ class ReviewRepository:
                 # belongs to this research question.
                 #
 
-                persisted_finding_ids = set(
-                    row[0]
-                    for row in (
-                        self.db.query(
-                            Finding.id
-                        )
-                        .filter(
-                            Finding.research_question_id
-                            == question_id
-                        )
-                        .all()
-                    )
-                )
-
-                if not valid_finding_ids.issubset(
-                    persisted_finding_ids
-                ):
-
-                    raise ValueError(
-                        "Review evidence contains "
-                        "findings belonging to another "
-                        "question or missing findings."
-                    )
+                
 
                 #
                 # Validate review references before
                 # inserting any review entities.
                 #
 
-                self._validate_finding_references(
-                    review=review,
-                    valid_finding_ids=(
-                        valid_finding_ids
-                    ),
-                )
+                
 
                 #
                 # Insert the review and all associated

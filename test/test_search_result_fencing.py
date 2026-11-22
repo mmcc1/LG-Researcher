@@ -2,7 +2,7 @@ from dataclasses import replace
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from sqlalchemy import event, select, update
+from sqlalchemy import event, select, update, text
 
 from domain.search import SearchResult
 
@@ -253,6 +253,18 @@ def delete_session(session_id):
             == session_id
         ).delete(
             synchronize_session=False
+        )
+
+        db.execute(
+            text(
+                """
+                DELETE FROM dbo.research_scope_definitions
+                WHERE research_session_id = :session_id
+                """
+            ),
+            {
+                "session_id": session_id,
+            },
         )
 
         db.query(

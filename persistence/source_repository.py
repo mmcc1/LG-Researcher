@@ -75,6 +75,13 @@ class SourceRepository:
                     "the research session."
                 )
 
+            if not document.extracted_text.strip():
+
+                raise ValueError(
+                    "Cannot persist a source containing "
+                    "no usable research text."
+                )
+
             ExecutionLeaseRepository(
                 self.db
             ).fence(

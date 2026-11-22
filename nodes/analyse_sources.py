@@ -176,6 +176,15 @@ class AnalyseSourcesNode:
 
             try:
 
+                if not source.extracted_text.strip():
+
+                    print(
+                        f"Skipping source {source.id}: "
+                        "no usable research text."
+                    )
+
+                    continue
+
                 with self.session_factory() as db:
 
                     finding_repository = FindingRepository(
@@ -219,6 +228,15 @@ class AnalyseSourcesNode:
                         source_text=source.extracted_text,
                     )
                 )
+
+                if not context.strip() or selected_count == 0:
+
+                    print(
+                        f"Skipping source {source.id}: "
+                        "no usable research context."
+                    )
+
+                    continue
 
                 print(
                     f"Document chunks: {chunk_count}"

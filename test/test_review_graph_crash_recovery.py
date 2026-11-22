@@ -157,8 +157,11 @@ def main():
         assert count_rows("sources", session_id) == 2
         assert count_findings(session_id) == 2
         assert model.calls == Counter({
-            "ResearchPlan": 1, "SearchPlan": 2,
-            "SourceAnalysis": 2, "ResearchQuestionReview": 2,
+            "ResearchScopeDefinition": 1,
+            "ResearchPlan": 1,
+            "SearchPlan": 2,
+            "SourceAnalysis": 2,
+            "ResearchQuestionReview": 2,
         }), model.calls
         assert model.crash_count == 1
         print("TEST 9 - Research not repeated; review only retried as necessary: PASSED")

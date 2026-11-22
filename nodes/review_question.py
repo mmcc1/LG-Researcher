@@ -230,11 +230,77 @@ class ReviewQuestionNode:
                 )
             )
 
+            source_ids = {
+                finding.source_id
+                for finding in findings
+            }
+
+            sources = (
+                source_repository
+                .get_by_ids(
+                    source_ids
+                )
+            )
+
+            sources_by_id = {
+                source.id: source
+                for source in sources
+            }
+
+            valid_findings = []
+
+            for finding in findings:
+
+                source = sources_by_id.get(
+                    finding.source_id
+                )
+
+                if source is None:
+
+                    raise ValueError(
+                        f"Finding {finding.id} references "
+                        f"a missing source: {finding.source_id}"
+                    )
+
+                if (
+                    source.research_session_id != session_id
+                    or source.research_question_id != question_id
+                ):
+
+                    raise ValueError(
+                        f"Finding {finding.id} references "
+                        "a source outside the current "
+                        "research question."
+                    )
+
+                source_text = source.extracted_text
+
+                if not source_text or not source_text.strip():
+
+                    print(
+                        f"Excluding finding {finding.id}: "
+                        f"source {source.id} contains "
+                        "no usable research text."
+                    )
+
+                    continue
+
+                valid_findings.append(
+                    finding
+                )
+
+            findings = valid_findings
+
+            source_ids = {
+                finding.source_id
+                for finding in findings
+            }
+
             if not findings:
 
                 print()
                 print(
-                    "No findings exist for "
+                    "No usable findings exist for "
                     f"research question {question_id}."
                 )
 
@@ -252,8 +318,8 @@ class ReviewQuestionNode:
                     contradictions=[],
                     evidence_gaps=[
                         (
-                            "No research findings were available "
-                            "for this question."
+                            "No usable research findings were "
+                            "available for this question."
                         )
                     ],
                     overall_confidence="low",
@@ -284,23 +350,6 @@ class ReviewQuestionNode:
                 )
 
                 return {}
-
-            source_ids = {
-                finding.source_id
-                for finding in findings
-            }
-
-            sources = (
-                source_repository
-                .get_by_ids(
-                    source_ids
-                )
-            )
-
-            sources_by_id = {
-                source.id: source
-                for source in sources
-            }
 
             findings_text = (
                 self.context_builder.build(

@@ -32,13 +32,28 @@ class ReviewContextBuilder:
 
             if source is None:
 
-                source_title = "Unknown source"
-                source_url = "Unknown"
+                raise ValueError(
+                    f"Finding {finding.id} references "
+                    f"a missing source: {finding.source_id}"
+                )
 
-            else:
+            source_text = source.extracted_text
 
-                source_title = source.title
-                source_url = source.final_url
+            if not source_text or not source_text.strip():
+
+                raise ValueError(
+                    f"Finding {finding.id} references "
+                    "a source containing no usable "
+                    f"research text: {finding.source_id}"
+                )
+
+            source_url = source.final_url
+
+            source_title = source.title.strip()
+
+            if not source_title:
+
+                source_title = source_url
 
             part = (
                 f"FINDING ID: {finding.id}\n"

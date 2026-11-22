@@ -8,6 +8,9 @@ from domain.finding import ExtractedFinding, SourceAnalysis
 from domain.research_plan import ResearchPlan, ResearchQuestionPlan
 from domain.search import SearchPlan, SearchQuery, SearchResult
 from domain.web import RetrievedDocument
+from domain.research_scope import (
+    ResearchScopeDefinition,
+)
 from extraction.html import HtmlDocumentExtractor
 from graph.research_graph import create_research_graph
 from persistence.database import SessionLocal
@@ -25,6 +28,44 @@ TEST_QUESTION = "What does the controlled evidence establish?"
 TEST_CLAIM = "The controlled document identifies a deterministic test marker."
 
 
+def make_scope_definition(
+    topic,
+):
+
+    return ResearchScopeDefinition(
+        primary_subject=topic,
+        research_objective=(
+            "Establish what the controlled "
+            "research evidence demonstrates."
+        ),
+        definitions=[
+            {
+                "term": "Controlled evidence",
+                "definition": (
+                    "Deterministic source content "
+                    "supplied by the integration test."
+                ),
+            },
+        ],
+        included_concepts=[
+            "Controlled research evidence",
+            "Deterministic evidence markers",
+        ],
+        related_concepts=[],
+        excluded_concepts=[
+            "Unsupported claims",
+            "External research evidence",
+        ],
+        ambiguities=[],
+        evidence_requirements=[
+            "Claims must be supported by "
+            "the supplied source content.",
+            "Preserve the distinction between "
+            "source evidence and inference.",
+        ],
+    )
+
+
 class FakeStructuredChatModel:
 
     def __init__(self):
@@ -37,6 +78,12 @@ class FakeStructuredChatModel:
 
         def respond(messages):
             self.calls[name] += 1
+
+            if name == "ResearchScopeDefinition":
+
+                return make_scope_definition(
+                    "Deterministic graph integration test"
+                )
 
             if name == "ResearchPlan":
                 return ResearchPlan(
@@ -321,11 +368,16 @@ def main():
         )
         print("TEST 3 - Research lifecycle completed: PASSED")
 
-        assert fake_model.calls["ResearchPlan"] == 1, fake_model.calls
-        assert fake_model.calls["SearchPlan"] == 1, fake_model.calls
-        assert fake_model.calls["SourceAnalysis"] == 1, fake_model.calls
-        assert sum(fake_model.calls.values()) == 3, fake_model.calls
-        print("TEST 4 - Exactly three research model calls: PASSED")
+        assert fake_model.calls == Counter({
+            "ResearchScopeDefinition": 1,
+            "ResearchPlan": 1,
+            "SearchPlan": 1,
+            "SourceAnalysis": 1,
+        }), fake_model.calls
+
+        print(
+            "TEST 4 - Exactly four research model calls: PASSED"
+        )
 
         assert len(fake_search.calls) == 1, fake_search.calls
         assert fake_retriever.calls == [TEST_URL], fake_retriever.calls
@@ -334,6 +386,7 @@ def main():
         # These tables are used by the existing SQL Server persistence layer.
         # If your schema uses different names, adjust the names below only.
         expected_tables = {
+            "research_scope_definitions": 1,
             "research_questions": 1,
             "search_attempts": 1,
             "web_search_results": 1,

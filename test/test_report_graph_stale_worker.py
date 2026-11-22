@@ -27,8 +27,16 @@ from test_report_graph_integration import (
     make_graph,
     acquire_replacement_lease,
     cleanup_report,
+    report_artifact_counts,
+    report_artifact_snapshot,
+    expected_report_artifact_counts,
+    expected_partial_report_artifact_counts,
+    assert_report_artifacts_preserved,
+    expected_reporting_calls,
 )
-from test_report_graph_pause_resume import report_counts
+
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 
 class LeaseSupersedingReportModel(ReportModel):
@@ -48,7 +56,10 @@ class LeaseSupersedingReportModel(ReportModel):
 
         self.replacement_lease = None
 
-        self.report_attempts = 0
+        self.section_attempts = Counter()
+
+        self.before_supersession_snapshot = None
+
 
     def with_structured_output(
         self,
@@ -61,7 +72,7 @@ class LeaseSupersedingReportModel(ReportModel):
             **kwargs,
         )
 
-        if schema.__name__ != "ResearchReport":
+        if schema.__name__ != "ReportSection":
 
             return runnable
 
@@ -69,18 +80,31 @@ class LeaseSupersedingReportModel(ReportModel):
             messages,
         ):
 
-            self.report_attempts += 1
+            ordinal = self.section_ordinal(
+                messages
+            )
+
+            self.section_attempts[ordinal] += 1
 
             result = runnable.invoke(
                 messages
             )
 
-            if self.supersede_once:
+            if (
+                ordinal == 2
+                and self.supersede_once
+            ):
 
                 self.supersede_once = False
 
-                # Supersede execution ownership after inference,
-                # before GenerateReportNode persists the report.
+                # Capture committed artifacts before
+                # superseding execution ownership.
+
+                self.before_supersession_snapshot = (
+                    report_artifact_snapshot(
+                        self.session_id
+                    )
+                )
 
                 expire_lease(
                     self.session_id
@@ -98,7 +122,8 @@ class LeaseSupersedingReportModel(ReportModel):
                 )
 
                 print(
-                    "Injected lease supersession during reporting: "
+                    "Injected lease supersession "
+                    "after second section inference: "
                     f"version {self.old_lease.version} -> "
                     f"{self.replacement_lease.version}"
                 )
@@ -121,6 +146,14 @@ def main():
 
         session_id = create_session()
 
+        temporary_directory = TemporaryDirectory(
+            prefix="lgresearcher-report-test-"
+        )
+
+        output_directory = Path(
+            temporary_directory.name
+        )
+
         print(
             f"Disposable session: {session_id}"
         )
@@ -142,6 +175,12 @@ def main():
             model,
             search,
             retriever,
+            output_directory=output_directory,
+        )
+
+        report_path = (
+            output_directory
+            / f"{session_id}.txt"
         )
 
         research_lease = acquire_lease(
@@ -258,24 +297,56 @@ def main():
             )
 
         assert model.replacement_lease is not None, (
-            "The Report Agent did not supersede the execution lease."
+            "The second section invocation did not "
+            "supersede the execution lease."
         )
 
-        assert model.report_attempts == 1
+        assert model.replacement_lease.version != (
+            report_lease.version
+        )
 
-        print("TEST 5 - Lease superseded during reporting: PASSED")
+        assert model.section_attempts == Counter({
+            1: 1,
+            2: 1,
+        }), model.section_attempts
+
+        assert model.section_calls == Counter({
+            1: 1,
+            2: 1,
+        }), model.section_calls
+
+        assert model.calls == (
+            previous_calls + Counter({
+                "ProposedReportPlan": 1,
+                "ReportSection": 2,
+            })
+        ), model.calls
+
+        print(
+            "TEST 5 - Lease superseded after "
+            "second section inference: PASSED"
+        )
 
         assert caught is not None, (
-            "The stale worker unexpectedly completed without rejection."
+            "The stale worker unexpectedly "
+            "completed without rejection."
         )
 
-        assert type(caught).__name__ == "ExecutionLeaseFenceRejected", (
-            f"Unexpected exception type: {type(caught).__name__}"
+        assert type(caught).__name__ == (
+            "ExecutionLeaseFenceRejected"
+        ), (
+            f"Unexpected exception type: "
+            f"{type(caught).__name__}"
         )
 
-        print("TEST 6 - Stale worker rejected by lease fence: PASSED")
+        print(
+            "TEST 6 - Stale worker rejected "
+            "by lease fence: PASSED"
+        )
 
         assert status(session_id) == "reporting"
+
+        assert not report_path.exists()
 
         with SessionLocal() as db:
 
@@ -288,18 +359,40 @@ def main():
 
         assert existing_report is None
 
-        assert report_counts(
+        partial_counts = report_artifact_counts(
             session_id
-        ) == {
-            "reports": 0,
-            "sections": 0,
-            "references": 0,
-            "limitations": 0,
-        }
+        )
 
-        print("TEST 7 - No partial report persistence: PASSED")
+        assert partial_counts == (
+            expected_partial_report_artifact_counts()
+        ), partial_counts
 
-        replacement_lease = model.replacement_lease
+        print(
+            "TEST 7 - Stale second section "
+            "response not persisted: PASSED"
+        )
+
+        assert model.before_supersession_snapshot is not None
+
+        partial_snapshot = report_artifact_snapshot(
+            session_id
+        )
+
+        assert partial_snapshot == (
+            model.before_supersession_snapshot
+        ), (
+            "Reporting artifacts changed "
+            "after lease supersession."
+        )
+
+        print(
+            "TEST 8 - Stale worker did not "
+            "modify existing artifacts: PASSED"
+        )
+
+        replacement_lease = (
+            model.replacement_lease
+        )
 
         prepare(
             session_id,
@@ -307,7 +400,10 @@ def main():
             resume=True,
         )
 
-        print("TEST 8 - Replacement worker prepared: PASSED")
+        print(
+            "TEST 9 - Replacement worker "
+            "prepared: PASSED"
+        )
 
         invoke(
             graph,
@@ -319,11 +415,34 @@ def main():
 
         assert status(session_id) == "completed"
 
-        assert model.report_attempts == 2
+        assert model.section_attempts == Counter({
+            1: 1,
+            2: 2,
+        }), model.section_attempts
 
-        assert model.calls["ResearchReport"] == 2
+        assert model.section_calls == Counter({
+            1: 1,
+            2: 2,
+        }), model.section_calls
 
-        print("TEST 9 - Replacement worker completed report: PASSED")
+        print(
+            "TEST 10 - Replacement worker regenerated "
+            "only the rejected section: PASSED"
+        )
+
+        final_snapshot = report_artifact_snapshot(
+            session_id
+        )
+
+        assert_report_artifacts_preserved(
+            partial_snapshot,
+            final_snapshot,
+        )
+
+        print(
+            "TEST 11 - Original reporting artifacts "
+            "preserved unchanged: PASSED"
+        )
 
         with SessionLocal() as db:
 
@@ -336,45 +455,110 @@ def main():
 
         assert recovered_report is not None
 
-        assert recovered_report.title == "Controlled Research Report"
+        assert recovered_report.title == (
+            "Controlled Research Report"
+        )
 
-        assert len(recovered_report.sections) == 1
+        assert len(
+            recovered_report.sections
+        ) == 2
 
-        assert recovered_report.sections[0].reviewed_claim_ids == [
-            model.reviewed_claim_id
-        ]
+        for index, section in enumerate(
+            recovered_report.sections
+        ):
+
+            assert section.ordinal == index + 1
+
+            assert section.heading == (
+                model.SECTION_HEADINGS[index]
+            )
+
+            assert section.content == (
+                model.SECTION_CONTENT[index]
+            )
+
+            assert section.reviewed_claim_ids == [
+                model.reviewed_claim_id
+            ]
 
         assert recovered_report.limitations == [
             "The evidence is a deterministic fixture."
         ]
 
-        print("TEST 10 - Recovered report provenance valid: PASSED")
+        print(
+            "TEST 12 - Recovered report content "
+            "and provenance valid: PASSED"
+        )
 
-        assert report_counts(
+        final_counts = report_artifact_counts(
             session_id
-        ) == {
-            "reports": 1,
-            "sections": 1,
-            "references": 1,
-            "limitations": 1,
-        }
+        )
 
-        print("TEST 11 - Exactly one complete report persisted: PASSED")
+        assert final_counts == (
+            expected_report_artifact_counts()
+        ), final_counts
 
-        for key, count in previous_calls.items():
+        print(
+            "TEST 13 - Exactly one complete set "
+            "of reporting artifacts persisted: PASSED"
+        )
 
-            assert model.calls[key] == count
+        expected_calls = (
+            previous_calls
+            + expected_reporting_calls()
+            + Counter({
+                "ReportSection": 1,
+            })
+        )
 
-        assert len(search.calls) == previous_searches
+        assert model.calls == (
+            expected_calls
+        ), model.calls
 
-        assert len(retriever.calls) == previous_retrievals
+        assert len(search.calls) == (
+            previous_searches
+        )
 
-        print("TEST 12 - Research and review not repeated: PASSED")
+        assert len(retriever.calls) == (
+            previous_retrievals
+        )
+
+        print(
+            "TEST 14 - Research, review and committed "
+            "reporting work not repeated: PASSED"
+        )
+
+        assert report_path.is_file()
+
+        report_text = report_path.read_text(
+            encoding="utf-8"
+        )
+
+        assert recovered_report.title in report_text
+
+        for section in recovered_report.sections:
+
+            assert section.heading in report_text
+
+            assert section.content in report_text
+
+        assert "BIBLIOGRAPHY" in report_text
+
+        assert not list(
+            output_directory.glob("*.tmp")
+        )
+
+        print(
+            "TEST 15 - Replacement worker published "
+            "report successfully: PASSED"
+        )
 
         print()
         print("PASS")
 
     finally:
+
+        temporary_directory.cleanup()
 
         if session_id is not None:
 

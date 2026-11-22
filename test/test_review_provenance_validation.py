@@ -250,6 +250,53 @@ print(
     "PASSED"
 )
 
+#
+# Findings excluded during evidence preparation
+# must not be accepted as review provenance.
+#
+
+filtered_finding_ids = {
+    100,
+    102,
+}
+
+invalid_ids = (
+    ReviewAgent
+    ._get_invalid_finding_ids(
+        review=valid_review,
+        valid_finding_ids=filtered_finding_ids,
+    )
+)
+
+assert invalid_ids == {
+    101,
+}
+
+print(
+    "Excluded supporting finding detected: PASSED"
+)
+
+
+filtered_finding_ids = {
+    100,
+    101,
+}
+
+invalid_ids = (
+    ReviewAgent
+    ._get_invalid_finding_ids(
+        review=valid_review,
+        valid_finding_ids=filtered_finding_ids,
+    )
+)
+
+assert invalid_ids == {
+    102,
+}
+
+print(
+    "Excluded contradicting finding detected: PASSED"
+)
 
 print()
 print(

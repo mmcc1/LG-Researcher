@@ -57,7 +57,9 @@ class FindingRepository:
 
             ownership = self.db.execute(
                 text("""
-                    SELECT s.id
+                    SELECT
+                        s.id,
+                        s.extracted_text
                     FROM dbo.sources AS s
                     INNER JOIN dbo.research_questions AS q
                         ON q.id = :question_id
@@ -78,6 +80,16 @@ class FindingRepository:
                 raise ValueError(
                     "Source and research question do not "
                     "belong to the execution session."
+                )
+
+            source_text = ownership.extracted_text
+
+            if not source_text or not source_text.strip():
+
+                raise ValueError(
+                    "Cannot persist research analysis "
+                    "for a source containing no usable "
+                    f"research text: {source_id}"
                 )
 
             existing_analysis = (

@@ -246,10 +246,7 @@ class ReportCitationRegistry:
 
         if not title:
 
-            raise ValueError(
-                "Citation source has no title: "
-                f"{source.source_id}"
-            )
+            title = url
 
         number = len(bibliography) + 1
 

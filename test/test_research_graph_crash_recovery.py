@@ -152,7 +152,11 @@ def main():
         assert count_rows("sources", session_id) == 0
         assert count_findings(session_id) == 0
         assert len(search.calls) == 1, search.calls
-        assert model.calls == Counter({"ResearchPlan": 1, "SearchPlan": 1})
+        assert model.calls == Counter({
+            "ResearchScopeDefinition": 1,
+            "ResearchPlan": 1,
+            "SearchPlan": 1,
+        }), model.calls
         print("TEST 3 - Partial progress durable and consistent: PASSED")
 
         # Simulate lease expiry while the original worker is gone.
@@ -174,9 +178,12 @@ def main():
         # first invocation crashes, second successfully retrieves.
         assert len(search.calls) == 1, search.calls
         assert retriever.calls == [TEST_URL, TEST_URL], retriever.calls
-        assert model.calls == Counter(
-            {"ResearchPlan": 1, "SearchPlan": 1, "SourceAnalysis": 1}
-        ), model.calls
+        assert model.calls == Counter({
+            "ResearchScopeDefinition": 1,
+            "ResearchPlan": 1,
+            "SearchPlan": 1,
+            "SourceAnalysis": 1,
+        }), model.calls
         print("TEST 6 - Search and planning not repeated: PASSED")
 
         assert count_rows("search_attempts", session_id) == 1

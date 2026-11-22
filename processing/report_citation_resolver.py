@@ -182,7 +182,13 @@ class ReportCitationResolver:
         rows = (
             self.db.query(
                 association_model.reviewed_claim_id,
+                association_model.finding_id,
+                ResearchQuestion.id,
+                Finding,
                 Source,
+            )
+            .select_from(
+                association_model
             )
             .join(
                 ReviewedClaimEntity,
@@ -199,12 +205,12 @@ class ReportCitationResolver:
                 QuestionReview.research_question_id
                 == ResearchQuestion.id,
             )
-            .join(
+            .outerjoin(
                 Finding,
                 association_model.finding_id
                 == Finding.id,
             )
-            .join(
+            .outerjoin(
                 Source,
                 Finding.source_id
                 == Source.id,
@@ -215,17 +221,11 @@ class ReportCitationResolver:
                 ),
                 ResearchQuestion.research_session_id
                 == session_id,
-                Finding.research_question_id
-                == ResearchQuestion.id,
-                Source.research_session_id
-                == session_id,
-                Source.research_question_id
-                == ResearchQuestion.id,
             )
             .order_by(
                 association_model.reviewed_claim_id,
                 Source.id,
-                Finding.id,
+                association_model.finding_id,
             )
             .all()
         )
@@ -234,7 +234,57 @@ class ReportCitationResolver:
 
         seen_source_ids = {}
 
-        for claim_id, source in rows:
+        for (
+            claim_id,
+            finding_id,
+            question_id,
+            finding,
+            source,
+        ) in rows:
+
+            if finding is None:
+
+                raise ValueError(
+                    f"Reviewed claim {claim_id} references "
+                    f"a missing finding: {finding_id}"
+                )
+
+            if finding.research_question_id != question_id:
+
+                raise ValueError(
+                    f"Reviewed claim {claim_id} references "
+                    f"finding {finding_id} belonging to "
+                    "another research question."
+                )
+
+            if source is None:
+
+                raise ValueError(
+                    f"Finding {finding_id} references "
+                    f"a missing source: {finding.source_id}"
+                )
+
+            if (
+                source.research_session_id != session_id
+                or source.research_question_id != question_id
+            ):
+
+                raise ValueError(
+                    f"Finding {finding_id} references "
+                    f"source {source.id} outside the "
+                    "current research question."
+                )
+
+            source_text = source.extracted_text
+
+            if not source_text or not source_text.strip():
+
+                raise ValueError(
+                    f"Reviewed claim {claim_id} references "
+                    f"finding {finding_id} supported by "
+                    "a source containing no usable "
+                    f"research text: {source.id}"
+                )
 
             if claim_id not in sources_by_claim:
 
@@ -263,7 +313,7 @@ class ReportCitationResolver:
             ].append(
                 CitationSource(
                     source_id=source.id,
-                    title=source.title,
+                    title=source.title or "",
                     requested_url=(
                         source.requested_url
                     ),

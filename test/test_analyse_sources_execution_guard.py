@@ -35,13 +35,22 @@ def make_lease():
     )
 
 
-def make_source(source_id):
+def make_source(
+    source_id,
+    extracted_text=None,
+):
+
+    if extracted_text is None:
+
+        extracted_text = (
+            f"Content for source {source_id}"
+        )
 
     return SimpleNamespace(
         id=source_id,
         title=f"Source {source_id}",
         final_url=f"https://example.com/{source_id}",
-        extracted_text=f"Content for source {source_id}",
+        extracted_text=extracted_text,
     )
 
 
@@ -153,7 +162,14 @@ def repository_patches():
         patch(
             "nodes.analyse_sources.FindingRepository"
         ) as finding_repository_class,
+        patch(
+            "nodes.analyse_sources.ResearchScopeRepository"
+        ) as scope_repository_class,
     ):
+
+        scope_repository_class.return_value.get.return_value = (
+            None
+        )
 
         yield (
             source_repository_class,
@@ -462,3 +478,224 @@ def test_successful_analysis_uses_execution_lease(
     assert arguments["analysis"] is not None
 
     assert guard.call_count == 5
+
+
+
+@pytest.mark.parametrize(
+    "extracted_text",
+    [
+        "",
+        " ",
+        "\t\r\n ",
+    ],
+)
+def test_unusable_source_is_not_analysed(
+    repository_patches,
+    extracted_text,
+):
+
+    (
+        node,
+        config,
+        summariser,
+        context_builder,
+        source_repository,
+        finding_repository,
+    ) = make_node(
+        sources=[
+            make_source(
+                1,
+                extracted_text=extracted_text,
+            ),
+        ],
+    )
+
+    configure_repositories(
+        repository_patches,
+        source_repository,
+        finding_repository,
+    )
+
+    result = node(
+        make_state(),
+        config,
+    )
+
+    assert result == {}
+
+    finding_repository.analysis_exists.assert_not_called()
+
+    context_builder.build.assert_not_called()
+
+    summariser.analyse.assert_not_called()
+
+    finding_repository.save_analysis.assert_not_called()
+
+
+
+@pytest.mark.parametrize(
+    "context_result",
+    [
+        ("", 0, 0),
+        ("", 3, 2),
+        (" \t\r\n ", 3, 2),
+        ("Unexpected context", 3, 0),
+    ],
+)
+def test_unusable_context_prevents_analysis(
+    repository_patches,
+    context_result,
+):
+
+    (
+        node,
+        config,
+        summariser,
+        context_builder,
+        source_repository,
+        finding_repository,
+    ) = make_node(
+        sources=[make_source(1)],
+    )
+
+    configure_repositories(
+        repository_patches,
+        source_repository,
+        finding_repository,
+    )
+
+    context_builder.build.return_value = (
+        context_result
+    )
+
+    result = node(
+        make_state(),
+        config,
+    )
+
+    assert result == {}
+
+    context_builder.build.assert_called_once()
+
+    summariser.analyse.assert_not_called()
+
+    finding_repository.save_analysis.assert_not_called()
+
+
+def test_unusable_source_does_not_prevent_valid_analysis(
+    repository_patches,
+):
+
+    (
+        node,
+        config,
+        summariser,
+        context_builder,
+        source_repository,
+        finding_repository,
+    ) = make_node(
+        sources=[
+            make_source(
+                1,
+                extracted_text="",
+            ),
+            make_source(2),
+        ],
+    )
+
+    configure_repositories(
+        repository_patches,
+        source_repository,
+        finding_repository,
+    )
+
+    result = node(
+        make_state(),
+        config,
+    )
+
+    assert result == {}
+
+    context_builder.build.assert_called_once()
+
+    assert (
+        context_builder.build.call_args.kwargs[
+            "source_text"
+        ]
+        == "Content for source 2"
+    )
+
+    summariser.analyse.assert_called_once()
+
+    finding_repository.save_analysis.assert_called_once()
+
+    arguments = (
+        finding_repository.save_analysis.call_args.kwargs
+    )
+
+    assert arguments["source_id"] == 2
+
+    assert arguments["question_id"] == 10
+
+    assert (
+        arguments["lease"]
+        is config["configurable"]["execution_lease"]
+    )
+
+
+
+def test_unusable_context_does_not_prevent_valid_analysis(
+    repository_patches,
+):
+
+    (
+        node,
+        config,
+        summariser,
+        context_builder,
+        source_repository,
+        finding_repository,
+    ) = make_node(
+        sources=[
+            make_source(1),
+            make_source(2),
+        ],
+    )
+
+    configure_repositories(
+        repository_patches,
+        source_repository,
+        finding_repository,
+    )
+
+    context_builder.build.side_effect = [
+        ("", 0, 0),
+        ("Valid selected context", 3, 2),
+    ]
+
+    result = node(
+        make_state(),
+        config,
+    )
+
+    assert result == {}
+
+    assert context_builder.build.call_count == 2
+
+    summariser.analyse.assert_called_once()
+
+    assert (
+        summariser.analyse.call_args.kwargs[
+            "source_text"
+        ]
+        == "Valid selected context"
+    )
+
+    finding_repository.save_analysis.assert_called_once()
+
+    assert (
+        finding_repository.save_analysis.call_args.kwargs[
+            "source_id"
+        ]
+        == 2
+    )

@@ -152,7 +152,13 @@ def main():
         assert status(session_id) == "reviewed", status(session_id)
         print("TEST 4 - Review graph completed: PASSED")
 
-        assert model.calls["ResearchQuestionReview"] == 1, model.calls
+        assert model.calls == Counter({
+            "ResearchScopeDefinition": 1,
+            "ResearchPlan": 1,
+            "SearchPlan": 1,
+            "SourceAnalysis": 1,
+            "ResearchQuestionReview": 1,
+        }), model.calls
         assert model.calls["ResearchReport"] == 0, model.calls
         print("TEST 5 - Review model invoked once; report not invoked: PASSED")
 
@@ -181,6 +187,7 @@ def main():
         assert model.calls["ResearchPlan"] == 1
         assert model.calls["SearchPlan"] == 1
         assert model.calls["SourceAnalysis"] == 1
+        assert model.calls["ResearchScopeDefinition"] == 1
         print("TEST 8 - Research not repeated during review: PASSED")
         print("\nPASS")
     finally:

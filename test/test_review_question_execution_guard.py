@@ -112,9 +112,19 @@ def review_environment():
     sources = [
         SimpleNamespace(
             id=201,
+            research_session_id="test-session",
+            research_question_id=10,
+            title="First source",
+            final_url="https://example.com/201",
+            extracted_text="First source evidence.",
         ),
         SimpleNamespace(
             id=202,
+            research_session_id="test-session",
+            research_question_id=10,
+            title="Second source",
+            final_url="https://example.com/202",
+            extracted_text="Second source evidence.",
         ),
     ]
 
@@ -128,7 +138,14 @@ def review_environment():
         patch(
             "nodes.review_question.SourceRepository"
         ) as source_repository_class,
+        patch(
+            "nodes.review_question.ResearchScopeRepository"
+        ) as scope_repository_class,
     ):
+
+        scope_repository_class.return_value.get.return_value = (
+            None
+        )
 
         review_repository = (
             review_repository_class.return_value
@@ -321,6 +338,7 @@ def test_successful_review_uses_execution_lease(
             101,
             102,
         },
+        scope_definition=None,
     )
 
     environment.review_repository.save_review_fenced.assert_called_once_with(
@@ -404,3 +422,249 @@ def test_invalid_execution_guard_is_rejected(
     environment.review_agent.review.assert_not_called()
 
     environment.review_repository.save_review_fenced.assert_not_called()
+
+
+
+@pytest.mark.parametrize(
+    "extracted_text",
+    [
+        "",
+        " ",
+        "\t\r\n ",
+    ],
+)
+def test_invalid_source_findings_excluded_from_review(
+    review_environment,
+    extracted_text,
+):
+
+    environment = review_environment
+
+    sources = (
+        environment.source_repository
+        .get_by_ids.return_value
+    )
+
+    sources[0].extracted_text = extracted_text
+
+    lease = make_lease()
+
+    result = environment.node(
+        make_state(),
+        make_config(lease),
+    )
+
+    assert result == {}
+
+    environment.context_builder.build.assert_called_once()
+
+    context_arguments = (
+        environment.context_builder.build.call_args.kwargs
+    )
+
+    context_finding_ids = {
+        finding.id
+        for finding in context_arguments["findings"]
+    }
+
+    assert context_finding_ids == {102}
+
+    environment.review_agent.review.assert_called_once()
+
+    review_arguments = (
+        environment.review_agent.review.call_args.kwargs
+    )
+
+    assert review_arguments["valid_finding_ids"] == {
+        102,
+    }
+
+    environment.review_repository.save_review_fenced.assert_called_once()
+
+    persistence_arguments = (
+        environment.review_repository
+        .save_review_fenced.call_args.kwargs
+    )
+
+    assert persistence_arguments["valid_finding_ids"] == {
+        102,
+    }
+
+    assert persistence_arguments["lease"] is lease
+
+
+def test_all_invalid_findings_produce_insufficient_evidence(
+    review_environment,
+):
+
+    environment = review_environment
+
+    sources = (
+        environment.source_repository
+        .get_by_ids.return_value
+    )
+
+    sources[0].extracted_text = ""
+
+    sources[1].extracted_text = " \t\r\n "
+
+    lease = make_lease()
+
+    result = environment.node(
+        make_state(),
+        make_config(lease),
+    )
+
+    assert result == {}
+
+    environment.context_builder.build.assert_not_called()
+
+    environment.review_agent.review.assert_not_called()
+
+    environment.review_repository.save_review_fenced.assert_called_once()
+
+    arguments = (
+        environment.review_repository
+        .save_review_fenced.call_args.kwargs
+    )
+
+    review = arguments["review"]
+
+    assert review.answer == (
+        "Insufficient evidence to answer "
+        "the research question."
+    )
+
+    assert review.overall_confidence == "low"
+
+    assert review.sufficient_evidence is False
+
+    assert review.reviewed_claims == []
+
+    assert review.contradictions == []
+
+    assert review.evidence_gaps == [
+        (
+            "No usable research findings were "
+            "available for this question."
+        )
+    ]
+
+    assert arguments["valid_finding_ids"] == set()
+
+    assert arguments["lease"] is lease
+
+
+
+def test_missing_source_prevents_review(
+    review_environment,
+):
+
+    environment = review_environment
+
+    sources = (
+        environment.source_repository
+        .get_by_ids.return_value
+    )
+
+    sources.pop(0)
+
+    with pytest.raises(ValueError):
+
+        environment.node(
+            make_state(),
+            make_config(
+                make_lease()
+            ),
+        )
+
+    environment.context_builder.build.assert_not_called()
+
+    environment.review_agent.review.assert_not_called()
+
+    environment.review_repository.save_review_fenced.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "attribute, invalid_value",
+    [
+        (
+            "research_session_id",
+            "foreign-session",
+        ),
+        (
+            "research_question_id",
+            999,
+        ),
+    ],
+)
+def test_foreign_source_prevents_review(
+    review_environment,
+    attribute,
+    invalid_value,
+):
+
+    environment = review_environment
+
+    sources = (
+        environment.source_repository
+        .get_by_ids.return_value
+    )
+
+    setattr(
+        sources[0],
+        attribute,
+        invalid_value,
+    )
+
+    with pytest.raises(ValueError):
+
+        environment.node(
+            make_state(),
+            make_config(
+                make_lease()
+            ),
+        )
+
+    environment.context_builder.build.assert_not_called()
+
+    environment.review_agent.review.assert_not_called()
+
+    environment.review_repository.save_review_fenced.assert_not_called()
+
+
+def test_existing_invalid_review_cannot_be_recovered(
+    review_environment,
+):
+
+    environment = review_environment
+
+    environment.review_repository.exists_for_question.return_value = (
+        True
+    )
+
+    environment.review_repository.save_review_fenced.side_effect = (
+        ValueError(
+            "Existing review contains invalid evidence."
+        )
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="invalid evidence",
+    ):
+
+        environment.node(
+            make_state(),
+            make_config(
+                make_lease()
+            ),
+        )
+
+    environment.finding_repository.get_for_question.assert_not_called()
+
+    environment.context_builder.build.assert_not_called()
+
+    environment.review_agent.review.assert_not_called()
+
+    environment.review_repository.save_review_fenced.assert_called_once()

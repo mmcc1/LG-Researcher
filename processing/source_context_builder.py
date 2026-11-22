@@ -44,17 +44,17 @@ class SourceContextBuilder:
         source_text: str,
     ) -> tuple[str, int, int]:
 
+        source_text = source_text.strip()
+
+        if not source_text:
+
+            return (
+                "",
+                0,
+                0,
+            )
+
         if not self.chunking_enabled:
-
-            source_text = source_text.strip()
-
-            if not source_text:
-
-                return (
-                    "",
-                    0,
-                    0,
-                )
 
             context = source_text[
                 :self.max_characters

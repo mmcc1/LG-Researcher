@@ -32,7 +32,10 @@ class HtmlDocumentExtractor:
             errors="replace",
         )
 
-        if document.content_type == "text/html":
+        if document.content_type in (
+            "text/html",
+            "application/xhtml+xml",
+        ):
 
             soup = BeautifulSoup(
                 raw_content,

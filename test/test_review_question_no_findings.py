@@ -77,7 +77,18 @@ class ReviewQuestionNoFindingsTests(TestCase):
             patch(
                 "nodes.review_question.SourceRepository"
             ) as source_repository_class,
+            patch(
+                "nodes.review_question.ResearchScopeRepository"
+            ) as scope_repository_class,
         ):
+
+            scope_repository_class.return_value.get.return_value = (
+                None
+            )
+
+            source_repository_class.return_value.get_by_ids.return_value = (
+                []
+            )
 
             review_repository = (
                 review_repository_class.return_value
@@ -123,7 +134,9 @@ class ReviewQuestionNoFindingsTests(TestCase):
                 source_repository_class.return_value
             )
 
-            source_repository.get_by_ids.assert_not_called()
+            source_repository.get_by_ids.assert_called_once_with(
+                set()
+            )
 
             review_repository.save_review_fenced.assert_called_once()
 

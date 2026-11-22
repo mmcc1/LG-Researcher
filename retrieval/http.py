@@ -143,6 +143,13 @@ class HttpDocumentRetriever(DocumentRetriever):
                                 "maximum permitted size."
                             )
 
+                    if not content:
+
+                        raise ValueError(
+                            "Retrieved document contains no content. "
+                            f"HTTP status: {response.status_code}."
+                        )
+
                     return RetrievedDocument(
                         requested_url=url,
                         final_url=str(

@@ -253,6 +253,13 @@ class RetrieveSourcesNode:
                     )
                 )
 
+                if not document.extracted_text.strip():
+
+                    raise ValueError(
+                        "Retrieved document contains "
+                        "no usable research text."
+                    )
+
                 with self.session_factory() as db:
 
                     source_repository = (
