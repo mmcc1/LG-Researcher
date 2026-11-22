@@ -9,6 +9,8 @@ Can be found in the root folder of the app in a file called 'DeploymentNotes.txt
 ![Alt Text](images/lgresearcher.png)  
 
 **Sample Report Output**  
+
+The following out was created with Qwen3:8b.  Qwen3:8b is a very small local model, yet the generated output is quite coherent and structured.
   
 [Pastebin](https://pastebin.com/UMAHqGnd)
 
